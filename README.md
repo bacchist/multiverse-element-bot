@@ -22,9 +22,9 @@ A Matrix bot for The Multiverse School that helps with URL handling and article 
    python -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
-3. Install dependencies:
+3. Install dependencies using uv:
    ```bash
-   pip install -e .
+   uv sync
    ```
 4. Create a `config.py` file with your Matrix credentials:
    ```python
@@ -36,6 +36,7 @@ A Matrix bot for The Multiverse School that helps with URL handling and article 
 ## Requirements
 
 - Python ≥ 3.13
+- uv (Python package manager)
 - Dependencies:
   - baml-py ≥ 0.85.0
   - crawl4ai ≥ 0.5.0.post8
@@ -45,7 +46,7 @@ A Matrix bot for The Multiverse School that helps with URL handling and article 
 ## Running the Bot
 
 ```bash
-python main.py
+uv run python main.py
 ```
 
 ## Development
