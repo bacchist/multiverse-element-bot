@@ -1,3 +1,4 @@
+import os
 import niobot
 import logging
 import config
@@ -6,6 +7,8 @@ from baml_client.sync_client import b
 from niobot import FileAttachment
 import requests
 import asyncio
+
+os.environ["OPENAI_API_KEY"] = config.OPENAI_API_KEY
 
 logging.basicConfig(level=logging.INFO, filename="bot.log")
 
