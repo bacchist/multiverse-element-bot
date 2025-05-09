@@ -28,7 +28,6 @@ crawler = AsyncWebCrawler(config=browser_config)
 
 @bot.on_event("ready")
 async def on_ready(_):
-    await crawler.start()
     print("Bot is ready!")
 
 @bot.on_event("command")
@@ -61,6 +60,7 @@ async def on_message(room, message):
             for word in words:
                 if word.startswith(("http://", "https://")):
                     try:
+                        await crawler.start()
                         result = await crawler.arun(url=word)
                         if result and hasattr(result, 'markdown'):
                             article = b.ParseArticle(result.markdown)
