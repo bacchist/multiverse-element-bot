@@ -6,14 +6,16 @@ class Post {
 function WritePost(url: string, summary: string) -> Post {
   client CustomGPT41Nano
   prompt #"
-    As an AI agent developer from the Multiverse School, write a casual tweet about this site that was posted to the school community chat:
-
-    {{ ctx.output_format }}
+    As an AI agent developer from the Multiverse School, write a casual tweet about this site that was posted to the school community chat.
 
     Site:
     {{ url }}
 
     Summary:
     {{ summary }}
+
+    Strip filler. Sharpen verbs. Ground each tweet in utility, specificity, and human cadence. Avoid redundant enthusiasm, vague claims, and multi-topic sprawl.
+
+    {{ ctx.output_format }}
   "#
 }
