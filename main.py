@@ -22,10 +22,10 @@ bot = niobot.NioBot(
 browser_config = BrowserConfig(
 )
 crawler = AsyncWebCrawler(config=browser_config)
-await crawler.start()
 
 @bot.on_event("ready")
 async def on_ready(_):
+    await crawler.start()
     print("Bot is ready!")
 
 @bot.on_event("command")
