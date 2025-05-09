@@ -106,4 +106,14 @@ async def forward(ctx: niobot.Context, url: str):
     else:
         await ctx.respond("Failed to retrieve content from the URL.")
 
+@bot.command()
+@niobot.is_owner()
+async def join_room(ctx, room: str):
+    resp = await bot.join(room)
+    if isinstance(resp, niobot.JoinResponse):
+        await ctx.respond("joined " + room + " successfully.")
+    else:
+        await ctx.respond(f"Failed to join {room}: {resp}")
+
+
 bot.run(access_token=config.ACCESS_TOKEN)
