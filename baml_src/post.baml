@@ -6,7 +6,8 @@ class Post {
 function WritePost(url: string, summary: string) -> Post {
   client CustomGPT41Nano
   prompt #"
-    Write a tweet length post about the following site:
+    As an AI agent developer from the Multiverse School, write a tweet about this
+    site that was posted to the school community chat:
 
     {{ ctx.output_format }}
 
