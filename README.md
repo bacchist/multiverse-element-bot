@@ -26,7 +26,11 @@ A Matrix bot for The Multiverse School that helps with URL handling and article 
    ```bash
    uv sync
    ```
-4. Create a `config.py` file with your Matrix credentials:
+4. Generate BAML
+   ```bash
+   baml-cli generate
+   ```
+5. Create a `config.py` file with your Matrix credentials:
    ```python
    HOMESERVER = "https://matrix.themultiverse.school"
    USER_ID = "@your-bot:themultiverse.school"
