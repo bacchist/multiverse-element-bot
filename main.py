@@ -8,8 +8,6 @@ from niobot import FileAttachment
 import requests
 import asyncio
 
-os.environ["OPENAI_API_KEY"] = config.OPENAI_API_KEY
-
 logging.basicConfig(level=logging.INFO, filename="bot.log")
 
 bot = niobot.NioBot(
@@ -54,6 +52,13 @@ async def ping(ctx: niobot.Context):
 @bot.on_event("message")
 async def on_message(room, message):
     if isinstance(message, niobot.RoomMessage):
+        # Check if message is more than an hour old
+        from datetime import datetime, timezone
+        message_time = datetime.fromtimestamp(message.server_timestamp / 1000, timezone.utc)
+        now = datetime.now(timezone.utc)
+        if (now - message_time).total_seconds() > 3600:  # More than 1 hour
+            return
+
         print(f"{message.sender} said: {message}")
         if "http://" in message.body or "https://" in message.body:
             words = message.body.split()
