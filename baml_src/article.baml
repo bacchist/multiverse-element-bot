@@ -18,7 +18,7 @@ class ArticleSummary {
 }
 
 function ParseArticle(article: string) -> Article {
-  client CustomGPT4oMini
+  client CustomGPT41Nano
   prompt #"
     Parse the article into the following format:
 
@@ -31,7 +31,7 @@ function ParseArticle(article: string) -> Article {
 }
 
 function WriteArticleSummary(article: Article) -> ArticleSummary {
-  client CustomGPT4oMini
+  client CustomGPT41Nano
   prompt #"
     Write a summary of the article:
 

@@ -4,7 +4,7 @@ class Post {
 }
 
 function WritePost(url: string, summary: string) -> Post {
-  client CustomGPT4oMini
+  client CustomGPT41Nano
   prompt #"
     Write a tweet length post about the following site:
 

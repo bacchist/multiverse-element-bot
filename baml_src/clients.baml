@@ -1,5 +1,13 @@
 // Learn more about clients at https://docs.boundaryml.com/docs/snippets/clients/overview
 
+client<llm> CustomGPT41Nano {
+  provider openai
+  options {
+    model "gpt-4.1-nano"
+    api_key env.OPENAI_API_KEY
+  }
+}
+
 client<llm> CustomGPT4o {
   provider openai
   options {
