@@ -1,5 +1,5 @@
 class Post {
-  text string @description("a tweet length post about a site without the url")
+  text string @description("an insightful tweet length post about a site without the url")
   url string @description("the url of the site")
 }
 
