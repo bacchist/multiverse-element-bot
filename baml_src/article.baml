@@ -12,6 +12,11 @@ class Paragraph {
   text string
 }
 
+class ArticleSummary {
+  article Article
+  summary string
+}
+
 function ParseArticle(article: string) -> Article {
   client CustomGPT4oMini
   prompt #"
@@ -22,5 +27,17 @@ function ParseArticle(article: string) -> Article {
     Article:
     {{ article }}
 
+  "#
+}
+
+function WriteArticleSummary(article: Article) -> ArticleSummary {
+  client CustomGPT4oMini
+  prompt #"
+    Write a summary of the article:
+
+    {{ ctx.output_format }}
+
+    Article:
+    {{ article }}
   "#
 }

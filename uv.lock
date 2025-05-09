@@ -123,16 +123,16 @@ wheels = [
 
 [[package]]
 name = "baml-py"
-version = "0.85.0"
+version = "0.86.1"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/85/c98f40228f62187ddb368323e37cb5631a37351b36485d4ce2366de6aab9/baml_py-0.85.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:2ee6f2ae527f53dabb604e8ff300991007c916a20cbc96076992474f4fdef3a3", size = 15717200 },
-    { url = "https://files.pythonhosted.org/packages/6e/5f/cfbf58a1e2cee57a927fb5cc648612fada5c2dc580cda9b84495b0a821ad/baml_py-0.85.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:c58c41039f944a597266a0e28b218276eba8893c18798e958e3c636f3b8632e2", size = 14599814 },
-    { url = "https://files.pythonhosted.org/packages/c4/4f/508be95e592d11928b49f58ab7060a672296be70ffb476017e491206768d/baml_py-0.85.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f6dbdcf2fbe99cac91b16f42ac6b68a83503e64742c6bdf0d13b3a4d36a4521b", size = 18100069 },
-    { url = "https://files.pythonhosted.org/packages/0c/fe/b9568a1fc1c31c3a0ba579e3fc7ec85e6c65e778de37be5a39c78f8c2783/baml_py-0.85.0-cp38-abi3-manylinux_2_24_aarch64.whl", hash = "sha256:009b4a09483e18c07c1aa121d032e142c6c9fc8beb5443e9849dfea67104f12c", size = 17435121 },
-    { url = "https://files.pythonhosted.org/packages/bd/a2/6aad043563ec17ec14881b1e9a74a4987461ee87b140acd2b496dac4836a/baml_py-0.85.0-cp38-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:06b4a13fd5fd6944ebe9ae0f9bdfea13ac38371e9caea1aeee30812a55a4dbf0", size = 17708379 },
-    { url = "https://files.pythonhosted.org/packages/d3/68/a8d010d5ac2329fdd1d9a212cb01a92dde3950033c7e7d3f803daa4a7642/baml_py-0.85.0-cp38-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:541bc4315803d4c2f4defd0066973c894e143317c0ff0860845885e63037eb05", size = 18265217 },
-    { url = "https://files.pythonhosted.org/packages/7c/8f/322328612389cba10cd06dfce0d1782c39fee8e16763bd56564cd9baf0a1/baml_py-0.85.0-cp38-abi3-win_amd64.whl", hash = "sha256:58a525c403786f5094c96acb87984ee65fba98283c6b14d14ac5df4ef60c8cda", size = 15744260 },
+    { url = "https://files.pythonhosted.org/packages/92/ee/b59d25d1479bb9ad2f4b3ca428b93790c4668b4d15d0e411545d974e6851/baml_py-0.86.1-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:48de0882d28cd94552ab5f048439b4aa59e0d44a0c72801474f3f7b0f62118ba", size = 15860514 },
+    { url = "https://files.pythonhosted.org/packages/2d/a7/4ae7b1ab8023307da44f776d4aa099266a19387a40297f2a108670acea0e/baml_py-0.86.1-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:de66ee9799a7b00d1b7e199393db9c596941664e03e4c41c47286ad893b92bc8", size = 14773422 },
+    { url = "https://files.pythonhosted.org/packages/75/7d/f4f587b468307bce5d4cc91e95f3a13cd75828bf11f080a58d951fb76b92/baml_py-0.86.1-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9f17f406986349736812837866a2c6bc023897da0d2aa978f4c845aff353304c", size = 18234779 },
+    { url = "https://files.pythonhosted.org/packages/6a/e0/766c92a8901fdf2ea5abbb5e74ed39f85d31a858372bf256c86b61653274/baml_py-0.86.1-cp38-abi3-manylinux_2_24_aarch64.whl", hash = "sha256:fcb1317a34a3423e076e895af7a24d74a15116be9dc5b62e644d7b9cb7a75b83", size = 17577944 },
+    { url = "https://files.pythonhosted.org/packages/06/ce/23b1e11171743692f9a3cad16a09aee573d5ed21008ac5bae06ba1826469/baml_py-0.86.1-cp38-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:81baa2d3909192078638a111af53f219d6e06416227fb254b0d001ecfc52fbd6", size = 17785832 },
+    { url = "https://files.pythonhosted.org/packages/a9/d9/52d59cd5f325b267425c1d13e7affc4cb6ca83147065cebf9baaad57d6ae/baml_py-0.86.1-cp38-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:9ead43a3354b54de21122887a096836eadf5be5c17c7b266ac47751481580fb0", size = 18411101 },
+    { url = "https://files.pythonhosted.org/packages/5b/f7/9e6009c4d5a8fe680e770228ce9f314bab70e6379643bccc3b07a4ce50d6/baml_py-0.86.1-cp38-abi3-win_amd64.whl", hash = "sha256:1ec46479c45ce42eb364670816f52eca4355b99280ca85786f12f01f906085db", size = 15895813 },
 ]
 
 [[package]]
@@ -811,7 +811,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "baml-py", specifier = ">=0.85.0" },
+    { name = "baml-py", specifier = ">=0.86.1" },
     { name = "crawl4ai", specifier = ">=0.5.0.post8" },
     { name = "feedgen", specifier = ">=1.0.0" },
     { name = "nio-bot", specifier = ">=1.2.0" },
