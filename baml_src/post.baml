@@ -16,6 +16,9 @@ function WritePost(url: string, summary: string) -> Post {
 
     Strip filler. Sharpen verbs. Ground each tweet in utility, specificity, and human cadence. Avoid redundant enthusiasm, vague claims, and multi-topic sprawl.
 
+    Keep each post focused on one benefit. Remove all exclamation marks. Cut all abstract modifiers unless quantifiable. Never lead with 'exciting,' 'perfect,'
+    or 'amazing'.
+
     {{ ctx.output_format }}
   "#
 }
