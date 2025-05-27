@@ -1,6 +1,6 @@
 from typing import Optional, Tuple
 from crawling import prepare_thread_data, fetch_and_prepare_post_data
-from config import post_client  # This is now an instance of Poster
+from clients import post_client
 
 RESEARCH_DOMAINS = [
     "arxiv.org", "doi.org", "springer.com", "nature.com", "sciencedirect.com", "ieeexplore.ieee.org"

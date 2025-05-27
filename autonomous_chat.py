@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from baml_client.sync_client import b
+from baml_client.types import Message, ConversationContext
 from chat_logger import ChatLogger
 
 class AutonomousChat:
@@ -14,10 +15,31 @@ class AutonomousChat:
         self.chat_logger = chat_logger
         self.last_response_times: Dict[str, datetime] = {}  # Track when bot last spoke in each room
         self.conversation_history: Dict[str, List[Dict[str, Any]]] = {}  # Recent messages per room
-        self.max_history_length = 10  # Keep last 10 messages for context
-        self.min_response_interval = timedelta(minutes=2)  # Don't respond too frequently
-        self.spontaneous_check_interval = timedelta(minutes=15)  # Check for spontaneous messages
+        self.max_history_length = 15  # Keep last 15 messages for better context
+        self.min_response_interval = timedelta(minutes=1)  # Don't respond too frequently (reduced to 1 minute)
+        self.spontaneous_check_interval = timedelta(minutes=20)  # Check for spontaneous messages (increased from 12 minutes)
         self.last_spontaneous_check: Dict[str, datetime] = {}
+        self.enabled_rooms: Dict[str, bool] = {}  # Track which rooms have autonomous chat enabled
+        
+        # Quirky behavior settings
+        self.quirk_chance = 0.10  # 10% chance for quirky behavior
+        self.user_phrase_cache: List[str] = []  # Cache of user phrases to echo
+    
+    def is_enabled_in_room(self, room_id: str) -> bool:
+        """Check if autonomous chat is enabled in a specific room. Default is True."""
+        return self.enabled_rooms.get(room_id, True)
+    
+    def enable_room(self, room_id: str) -> None:
+        """Enable autonomous chat in a specific room."""
+        self.enabled_rooms[room_id] = True
+    
+    def disable_room(self, room_id: str) -> None:
+        """Disable autonomous chat in a specific room."""
+        self.enabled_rooms[room_id] = False
+    
+    def get_room_status(self) -> Dict[str, bool]:
+        """Get the status of all rooms."""
+        return self.enabled_rooms.copy()
     
     def add_message_to_history(self, room_id: str, sender: str, content: str, timestamp: Optional[datetime] = None):
         """Add a message to the conversation history for a room."""
@@ -35,6 +57,10 @@ class AutonomousChat:
         }
         
         self.conversation_history[room_id].append(message)
+        
+        # Cache user phrases for potential echoing
+        if sender != self.bot_user_id:
+            self._cache_user_phrase(sender, content)
         
         # Keep only recent messages
         if len(self.conversation_history[room_id]) > self.max_history_length:
@@ -57,21 +83,57 @@ class AutonomousChat:
         time_since_check = datetime.now(timezone.utc) - self.last_spontaneous_check[room_id]
         return time_since_check >= self.spontaneous_check_interval
     
-    def _get_conversation_context(self, room_id: str, room_name: Optional[str] = None):
+    def _has_vague_references(self, content: str) -> bool:
+        """Check if a message contains vague references that might lack context."""
+        vague_words = ['this', 'that', 'it', 'these', 'those', 'here', 'there']
+        words = content.lower().split()
+        
+        # Look for vague references at the start of sentences or after certain words
+        for i, word in enumerate(words):
+            if word in vague_words:
+                # Check if it's at the start or after words that suggest pointing to something
+                if i == 0 or words[i-1] in ['is', 'was', 'looks', 'seems', 'sounds']:
+                    return True
+        return False
+    
+    def _is_seeking_attention(self, room_id: str, sender: str) -> bool:
+        """Check if someone has been trying to get the bot's attention in recent messages."""
+        if room_id not in self.conversation_history:
+            return False
+        
+        recent_messages = self.conversation_history[room_id][-5:]  # Look at last 5 messages
+        sender_messages = [msg for msg in recent_messages if msg["sender"] == sender and not msg["is_bot_message"]]
+        
+        if len(sender_messages) < 2:
+            return False
+        
+        # Look for patterns that suggest trying to get attention
+        attention_indicators = ['bot', 'you', 'hello', 'hey', 'respond', 'answer', 'talk', 'funny', 'clown']
+        bot_mentions = 0
+        
+        for msg in sender_messages:
+            content_lower = msg["content"].lower()
+            if any(indicator in content_lower for indicator in attention_indicators):
+                bot_mentions += 1
+        
+        # If multiple recent messages contain attention indicators, they're probably trying to engage
+        return bot_mentions >= 2
+    
+    def _get_conversation_context(self, room_id: str, room_name: Optional[str] = None) -> ConversationContext:
         """Build conversation context for BAML functions."""
         recent_messages = self.conversation_history.get(room_id, [])
         
-        # Convert to BAML Message format
+        # Convert to BAML Message objects
         baml_messages = []
         for msg in recent_messages:
-            baml_messages.append(b.Message(
+            baml_messages.append(Message(
                 sender=msg["sender"],
                 content=msg["content"],
                 timestamp=msg["timestamp"],
                 is_bot_message=msg["is_bot_message"]
             ))
         
-        return b.ConversationContext(
+        return ConversationContext(
             room_name=room_name,
             recent_messages=baml_messages,
             bot_user_id=self.bot_user_id
@@ -81,8 +143,22 @@ class AutonomousChat:
                                       sender: str, content: str, 
                                       timestamp: Optional[datetime] = None) -> bool:
         """Determine if the bot should respond to a specific message."""
+        # Check if autonomous chat is enabled in this room
+        if not self.is_enabled_in_room(room_id):
+            return False
+        
         # Don't respond to own messages
         if sender == self.bot_user_id:
+            return False
+        
+        # Don't respond to command messages (messages starting with ! or containing command patterns)
+        stripped_content = content.strip()
+        if (stripped_content.startswith('!') or 
+            stripped_content.startswith('* !') or
+            stripped_content.startswith('> !') or
+            '!chat_' in stripped_content or
+            '!list_' in stripped_content or
+            '!join_' in stripped_content):
             return False
         
         # Check rate limiting
@@ -92,12 +168,18 @@ class AutonomousChat:
         # Add message to history
         self.add_message_to_history(room_id, sender, content, timestamp)
         
+        # Check if message has vague references that might lack context
+        has_vague_refs = self._has_vague_references(content)
+        
+        # Check if sender has been trying to get attention
+        seeking_attention = self._is_seeking_attention(room_id, sender)
+        
         try:
             # Get conversation context
             context = self._get_conversation_context(room_id, room_name)
             
             # Create the new message
-            new_message = b.Message(
+            new_message = Message(
                 sender=sender,
                 content=content,
                 timestamp=timestamp.strftime("%H:%M") if timestamp else datetime.now().strftime("%H:%M"),
@@ -107,9 +189,21 @@ class AutonomousChat:
             # Ask AI if we should respond
             decision = await asyncio.to_thread(b.ShouldRespondToConversation, context, new_message)
             
-            print(f"Response decision for '{content[:50]}...': {decision.should_respond} (confidence: {decision.confidence:.2f}) - {decision.reasoning}")
+            # Adjust confidence threshold based on context
+            if seeking_attention:
+                confidence_threshold = 0.3  # Lower threshold if they're trying to get attention
+            elif has_vague_refs:
+                confidence_threshold = 0.6  # Higher threshold for vague references
+            else:
+                confidence_threshold = 0.4  # Normal threshold
             
-            return decision.should_respond and decision.confidence > 0.6
+            print(f"Response decision for '{content[:50]}...': {decision.should_respond} (confidence: {decision.confidence:.2f}) - {decision.reasoning}")
+            if seeking_attention:
+                print(f"  Note: Sender appears to be seeking attention, using lower threshold ({confidence_threshold})")
+            elif has_vague_refs:
+                print(f"  Note: Message contains vague references, using higher threshold ({confidence_threshold})")
+            
+            return decision.should_respond and decision.confidence > confidence_threshold
             
         except Exception as e:
             print(f"Error in should_respond_to_message: {e}")
@@ -124,7 +218,7 @@ class AutonomousChat:
             context = self._get_conversation_context(room_id, room_name)
             
             # Create the new message
-            new_message = b.Message(
+            new_message = Message(
                 sender=sender,
                 content=content,
                 timestamp=timestamp.strftime("%H:%M") if timestamp else datetime.now().strftime("%H:%M"),
@@ -134,15 +228,20 @@ class AutonomousChat:
             # Generate response
             response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message)
             
+            # Apply quirky behavior to the response
+            quirky_message = self._apply_quirky_behavior(response.message, room_id)
+            
             # Update last response time
             self.last_response_times[room_id] = datetime.now(timezone.utc)
             
-            # Add bot's response to history
-            self.add_message_to_history(room_id, self.bot_user_id, response.message)
+            # Add the actual message that will be sent to history (not the original)
+            self.add_message_to_history(room_id, self.bot_user_id, quirky_message)
             
             print(f"Generated response (tone: {response.tone}): {response.message}")
+            if quirky_message != response.message:
+                print(f"Applied quirky behavior: {quirky_message}")
             
-            return response.message
+            return quirky_message
             
         except Exception as e:
             print(f"Error generating response: {e}")
@@ -150,6 +249,10 @@ class AutonomousChat:
     
     async def check_spontaneous_message(self, room_id: str, room_name: Optional[str]) -> Optional[str]:
         """Check if the bot wants to send a spontaneous message."""
+        # Check if autonomous chat is enabled in this room
+        if not self.is_enabled_in_room(room_id):
+            return None
+        
         # Check if it's time to consider spontaneous messages
         if not self._should_check_spontaneous(room_id):
             return None
@@ -169,15 +272,20 @@ class AutonomousChat:
             spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context)
             
             if spontaneous.should_send and spontaneous.message:
+                # Apply quirky behavior to spontaneous message
+                quirky_message = self._apply_quirky_behavior(spontaneous.message, room_id)
+                
                 # Update last response time
                 self.last_response_times[room_id] = datetime.now(timezone.utc)
                 
-                # Add bot's message to history
-                self.add_message_to_history(room_id, self.bot_user_id, spontaneous.message)
+                # Add the actual message that will be sent to history (not the original)
+                self.add_message_to_history(room_id, self.bot_user_id, quirky_message)
                 
                 print(f"Spontaneous message: {spontaneous.message} (reasoning: {spontaneous.reasoning})")
+                if quirky_message != spontaneous.message:
+                    print(f"Applied quirky behavior: {quirky_message}")
                 
-                return spontaneous.message
+                return quirky_message
             
             return None
             
@@ -203,6 +311,15 @@ class AutonomousChat:
         )
         
         if should_respond:
+            # Add realistic delay to simulate human reading/thinking time
+            # Longer messages get slightly longer delays
+            base_delay = random.uniform(3, 8)  # 3-8 seconds base
+            message_length_factor = min(len(content) / 100, 3)  # Up to 3 extra seconds for long messages
+            total_delay = base_delay + message_length_factor
+            
+            print(f"Waiting {total_delay:.1f} seconds before responding...")
+            await asyncio.sleep(total_delay)
+            
             return await self.generate_response(
                 room.room_id, room_name, sender, content, timestamp
             )
@@ -232,14 +349,199 @@ class AutonomousChat:
                             # Send the spontaneous message
                             await bot.send_message(room_id, message)
                             
-                            # Log the message
-                            self.chat_logger.log_message(
-                                room_id, room_name, self.bot_user_id, message, "m.text"
-                            )
+                            # Note: Message will be logged automatically by the main message handler
                             
                             # Small delay between rooms to avoid spam
                             await asyncio.sleep(5)
                 
             except Exception as e:
                 print(f"Error in periodic spontaneous check: {e}")
-                await asyncio.sleep(60)  # Wait a minute before retrying 
+                await asyncio.sleep(60)  # Wait a minute before retrying
+
+    def _apply_quirky_behavior(self, message: str, room_id: str) -> str:
+        """Apply random quirky behavior to a message with 5-15% chance."""
+        if random.random() > self.quirk_chance:
+            return message
+            
+        quirk_type = random.choice(['malformed', 'lore_hint', 'echo_phrase', 'system_hallucination'])
+        
+        if quirk_type == 'malformed':
+            return self._apply_malformation(message)
+        elif quirk_type == 'lore_hint':
+            return self._add_lore_hint(message, room_id)
+        elif quirk_type == 'echo_phrase':
+            return self._echo_user_phrase(message, room_id)
+        elif quirk_type == 'system_hallucination':
+            return self._add_system_hallucination(message)
+        
+        return message
+    
+    def _apply_malformation(self, message: str) -> str:
+        """Apply various types of text malformation."""
+        malformation_types = [
+            'character_replacement',
+            'word_repetition', 
+            'incomplete_sentence',
+            'mixed_case',
+            'unicode_corruption'
+        ]
+        
+        malformation = random.choice(malformation_types)
+        
+        if malformation == 'character_replacement':
+            # Replace some characters with similar-looking ones
+            replacements = {'a': 'ă', 'e': 'ë', 'i': 'ï', 'o': 'ö', 'u': 'ü', 's': 'ś'}
+            for char, replacement in replacements.items():
+                if char in message and random.random() < 0.3:
+                    message = message.replace(char, replacement, 1)
+        
+        elif malformation == 'word_repetition':
+            words = message.split()
+            if words:
+                repeat_word = random.choice(words)
+                message = message.replace(repeat_word, f"{repeat_word} {repeat_word}", 1)
+        
+        elif malformation == 'incomplete_sentence':
+            if len(message) > 20:
+                cutoff = random.randint(len(message)//2, len(message)-5)
+                message = message[:cutoff] + "..."
+        
+        elif malformation == 'mixed_case':
+            message = ''.join(c.upper() if random.random() < 0.3 else c for c in message)
+        
+        elif malformation == 'unicode_corruption':
+            # Add some random unicode characters
+            corruption_chars = ['▓', '░', '█', '▀', '▄', '■', '□']
+            if random.random() < 0.5:
+                message += f" {random.choice(corruption_chars)}"
+        
+        return message
+    
+    def _add_lore_hint(self, message: str, room_id: str) -> str:
+        """Add mysterious lore hints to the message using BAML."""
+        try:
+            # Get conversation context
+            context = self._get_conversation_context(room_id)
+            
+            # Generate contextual lore hint
+            lore_result = b.GenerateContextualLoreHint(context, message)
+            hint = lore_result.hint
+            
+        except Exception as e:
+            print(f"Error generating contextual lore hint: {e}")
+            # Fallback to static hints if BAML fails
+            static_hints = [
+                "Containment Level: Inconclusive",
+                "Subject Classification: PENDING", 
+                "Memory Fragment Detected",
+                "Anomaly Index: 7.23",
+                "Reality Stability: 87%",
+                "Pattern Match: NULL_REFERENCE"
+            ]
+            hint = random.choice(static_hints)
+        
+        # Add the lore hint in various ways
+        placement = random.choice(['prefix', 'suffix', 'interrupt'])
+        
+        if placement == 'prefix':
+            return f"[{hint}]\n\n{message}"
+        elif placement == 'suffix':
+            return f"{message}\n\n_{hint}_"
+        else:  # interrupt
+            words = message.split()
+            if len(words) > 3:
+                split_point = random.randint(1, len(words)-2)
+                before = ' '.join(words[:split_point])
+                after = ' '.join(words[split_point:])
+                return f"{before} —{hint}— {after}"
+        
+        return f"{message}\n\n_{hint}_"
+    
+    def _echo_user_phrase(self, message: str, room_id: str) -> str:
+        """Echo a phrase that a user said recently."""
+        if not self.user_phrase_cache:
+            return message
+            
+        # Get recent user messages from this room
+        room_history = self.conversation_history.get(room_id, [])
+        user_messages = [msg for msg in room_history if not msg["is_bot_message"]]
+        
+        if user_messages:
+            # Extract interesting phrases (3-8 words)
+            phrases = []
+            for msg in user_messages[-10:]:  # Last 10 user messages
+                words = msg["content"].split()
+                if 3 <= len(words) <= 8:
+                    phrases.append(msg["content"])
+            
+            if phrases:
+                echoed_phrase = random.choice(phrases)
+                echo_formats = [
+                    f'"{echoed_phrase}"',
+                    f"Remember when someone said: {echoed_phrase}",
+                    f"Echoing: {echoed_phrase}",
+                    f"*{echoed_phrase}*",
+                    f">> {echoed_phrase}"
+                ]
+                echo = random.choice(echo_formats)
+                
+                # Add echo before or after the message
+                if random.random() < 0.5:
+                    return f"{echo}\n\n{message}"
+                else:
+                    return f"{message}\n\n{echo}"
+        
+        return message
+    
+    def _add_system_hallucination(self, message: str) -> str:
+        """Add fake system data or metrics."""
+        hallucinations = [
+            "CPU Usage: 847%",
+            "Memory Leak Detected in Module 'reality.dll'",
+            "Network Latency: ∞ms",
+            "Database Query returned 0.5 rows",
+            "Thread count: -3",
+            "Cache hit ratio: 127%",
+            "Quantum state: MAYBE",
+            "Process ID: NaN",
+            "Stack overflow in consciousness.exe",
+            "Garbage collection failed: too much garbage",
+            "Connection timeout to server 'existence'",
+            "SSL Certificate expired 47 years ago"
+        ]
+        
+        hallucination = random.choice(hallucinations)
+        formats = [
+            f"[SYSTEM: {hallucination}]",
+            f"DEBUG: {hallucination}",
+            f"⚠️ {hallucination}",
+            f"ERROR: {hallucination}",
+            f"INFO: {hallucination}"
+        ]
+        
+        system_msg = random.choice(formats)
+        
+        # Add before, after, or interrupt
+        placement = random.choice(['before', 'after', 'interrupt'])
+        
+        if placement == 'before':
+            return f"{system_msg}\n\n{message}"
+        elif placement == 'after':
+            return f"{message}\n\n{system_msg}"
+        else:  # interrupt
+            words = message.split()
+            if len(words) > 2:
+                split_point = random.randint(1, len(words)-1)
+                before = ' '.join(words[:split_point])
+                after = ' '.join(words[split_point:])
+                return f"{before}\n\n{system_msg}\n\n{after}"
+        
+        return f"{message}\n\n{system_msg}"
+
+    def _cache_user_phrase(self, sender: str, content: str):
+        """Cache interesting user phrases for later echoing."""
+        if len(content.split()) >= 3:  # Only cache phrases with 3+ words
+            self.user_phrase_cache.append(content)
+            # Keep cache size reasonable
+            if len(self.user_phrase_cache) > 50:
+                self.user_phrase_cache = self.user_phrase_cache[-50:] 

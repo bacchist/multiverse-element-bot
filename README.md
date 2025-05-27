@@ -24,6 +24,9 @@ A Matrix bot for The Multiverse School that helps with URL handling and article 
 - `!join_room [room_id]`: Makes the bot join a specified room
 - `!chat_settings [action] [value]`: Control autonomous chat behavior
 - `!force_spontaneous`: Force the bot to consider sending a spontaneous message
+- `!chat_enable [room_id]`: Enable autonomous chat in a room (current room if no ID provided)
+- `!chat_disable [room_id]`: Disable autonomous chat in a room (current room if no ID provided)
+- `!chat_status`: Show autonomous chat status for all rooms
 
 ## Autonomous Conversation
 
@@ -58,6 +61,25 @@ Use `!chat_settings` to configure autonomous behavior:
 !chat_settings spontaneous 20           # Set spontaneous check interval (minutes)
 !chat_settings history 15               # Set conversation history length (1-50 messages)
 ```
+
+### Per-Room Chat Controls
+
+The owner can enable or disable autonomous chat on a per-room basis:
+
+```
+!chat_enable                            # Enable autonomous chat in current room
+!chat_enable !room:example.com          # Enable autonomous chat in specific room
+!chat_disable                           # Disable autonomous chat in current room  
+!chat_disable !room:example.com         # Disable autonomous chat in specific room
+!chat_status                            # Show status for all rooms
+```
+
+**Default Behavior**: Autonomous chat is enabled by default in all rooms. Once you use `!chat_enable` or `!chat_disable` in a room, that setting is remembered.
+
+**Use Cases**:
+- Disable in busy public rooms where the bot might be disruptive
+- Enable only in specific project or discussion rooms
+- Temporarily disable during meetings or focused work sessions
 
 ## Chat Logging
 
@@ -101,12 +123,72 @@ The bot automatically logs all chat activity to files in the `chat_logs/` direct
    ```bash
    baml-cli generate
    ```
-6. Create a `config.py` file with your Matrix credentials:
-   ```python
-   HOMESERVER = "https://matrix.themultiverse.school"
-   USER_ID = "@your-bot:themultiverse.school"
-   ACCESS_TOKEN = "your_access_token"
+6. **Configure the bot** (see Configuration section below)
+
+## Configuration
+
+⚠️ **Important**: Never commit secrets to git! All secret values should be stored in environment variables.
+
+### Environment Variables Setup
+
+1. **Copy the environment template:**
+   ```bash
+   cp env.example .env
    ```
+
+2. **Edit `.env` with your actual credentials:**
+   ```bash
+   # Matrix bot configuration
+   HOMESERVER=https://matrix.themultiverse.school
+   USER_ID=@your-bot:themultiverse.school
+   ACCESS_TOKEN=your-matrix-access-token
+   
+   # External API configuration
+   API_URL=https://your-api-endpoint.com/api/posts
+   API_TOKEN=your-api-token-here
+   
+   # OpenAI API configuration
+   OPENAI_API_KEY=your-openai-api-key-here
+   
+   # Bot configuration
+   OWNER_ID=@your-username:themultiverse.school
+   DEVICE_ID=your-device-id
+   ```
+
+3. **The `.env` file is automatically ignored by git** (see `.gitignore`)
+
+### Configuration Files
+
+The bot uses a clean separation of concerns:
+
+- **`.env`**: Contains all secret values (tokens, API keys, etc.)
+- **`bot_config.py`**: Loads environment variables and provides configuration
+- **`clients.py`**: Initializes external service clients
+- **`config.example.py`**: Shows the configuration structure (no secrets)
+
+### Security Notes
+- Never commit `.env` or any file with secrets to version control
+- Use environment variables for production deployments
+- Rotate credentials if they're accidentally exposed
+- Use a dedicated bot account with minimal permissions
+- The `.env` file is excluded from git automatically
+
+### Production Deployment
+
+For production, you can set environment variables directly instead of using a `.env` file:
+
+```bash
+export HOMESERVER="https://matrix.themultiverse.school"
+export USER_ID="@your-bot:themultiverse.school" 
+export ACCESS_TOKEN="your-matrix-access-token"
+export API_URL="https://your-api-endpoint.com/api/posts"
+export API_TOKEN="your-api-token-here"
+export OPENAI_API_KEY="your-openai-api-key-here"
+export OWNER_ID="@your-username:themultiverse.school"
+export DEVICE_ID="your-device-id"
+
+uv run python main.py
+```
 
 ## Requirements
 
@@ -141,11 +223,18 @@ The bot uses several key components:
 ├── autonomous_chat.py   # Autonomous conversation logic
 ├── chat_logger.py       # Chat logging functionality
 ├── bot_commands.py      # Bot commands and responses
+├── bot_config.py        # Configuration loader (loads from .env)
+├── clients.py           # External service clients initialization
+├── actions.py           # URL processing and API actions
+├── crawling.py          # Web crawling functionality
+├── post_client.py       # API client for posting content
 ├── baml_src/           # BAML AI function definitions
 │   ├── chat.baml       # Conversation AI functions
 │   ├── article.baml    # Article parsing functions
 │   └── post.baml       # Social media post generation
-├── config.py           # Configuration (not in repo)
+├── .env                # Environment variables (not in repo)
+├── env.example         # Environment variables template
+├── config.example.py   # Configuration structure example
 ├── chat_logs/          # Chat log files (not in repo)
 ├── urls.txt            # Collected URLs (not in repo)
 └── article.txt         # Temporary article storage (not in repo)

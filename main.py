@@ -1,6 +1,6 @@
 import niobot
 import logging
-import config
+import bot_config
 from crawl4ai import AsyncWebCrawler, BrowserConfig
 from actions import process_url
 from bot_commands import BotCommands
@@ -16,22 +16,27 @@ logging.basicConfig(level=logging.INFO, filename="bot.log")
 chat_logger = ChatLogger()
 
 bot = niobot.NioBot(
-    homeserver=config.HOMESERVER,
-    user_id=config.USER_ID,
-    device_id='topdesk',
+    homeserver=bot_config.HOMESERVER,
+    user_id=bot_config.USER_ID,
+    device_id=bot_config.DEVICE_ID,
     store_path='./store',
     command_prefix="!",
-    owner_id="@marshall:themultiverse.school"
+    owner_id=bot_config.OWNER_ID,
+    global_message_type="m.text"
 )
 
 # Initialize autonomous chat
-autonomous_chat = AutonomousChat(config.USER_ID, chat_logger)
+autonomous_chat = AutonomousChat(bot_config.USER_ID, chat_logger)
+
+# Store autonomous_chat on the bot for commands to access
+bot.autonomous_chat = autonomous_chat  # type: ignore
 
 browser_config = BrowserConfig()
 crawler = AsyncWebCrawler(config=browser_config)
 set_crawler(crawler)
 bot.crawler = crawler  # Attach crawler to bot for module access  # type: ignore
 
+# Mount the bot commands module
 bot.mount_module("bot_commands")
 
 @bot.on_event("ready")
@@ -99,7 +104,7 @@ async def on_message(room, message):
         return
     
     # Skip processing bot's own messages for autonomous chat
-    if sender == config.USER_ID:
+    if sender == bot_config.USER_ID:
         return
     
     # Check for autonomous conversation response
@@ -107,18 +112,6 @@ async def on_message(room, message):
         autonomous_response = await autonomous_chat.handle_message(room, message)
         if autonomous_response:
             await bot.send_message(room.room_id, autonomous_response)
-            chat_logger.log_message(
-                room.room_id,
-                room_name,
-                config.USER_ID,
-                autonomous_response,
-                "m.text"
-            )
-            chat_logger.log_bot_action(
-                room.room_id,
-                room_name,
-                f"Autonomous response to {sender}"
-            )
     except Exception as e:
         print(f"Error in autonomous chat: {e}")
     
@@ -206,4 +199,4 @@ async def on_room_member(room, event):
         timestamp
     )
 
-bot.run(access_token=config.ACCESS_TOKEN)
+bot.run(access_token=bot_config.ACCESS_TOKEN)
