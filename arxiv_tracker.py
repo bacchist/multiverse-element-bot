@@ -219,7 +219,11 @@ class ArxivAltmetricTracker:
                     
                     # Extract arXiv ID from the ID URL
                     id_url = id_elem.text
-                    arxiv_id = id_url.split('/')[-1]
+                    arxiv_id_full = id_url.split('/')[-1]
+                    
+                    # Remove version number for Altmetric API compatibility (e.g., 2505.20245v1 -> 2505.20245)
+                    # Keep the full ID for URLs but store base ID for Altmetric lookups
+                    arxiv_id_base = arxiv_id_full.split('v')[0] if 'v' in arxiv_id_full else arxiv_id_full  # Remove version for Altmetric
                     
                     # Extract authors
                     authors = []
@@ -260,11 +264,11 @@ class ArxivAltmetricTracker:
                         doi = doi_elem.text
                     
                     # Build URLs
-                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                    arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id_full}.pdf"
+                    arxiv_url = f"https://arxiv.org/abs/{arxiv_id_full}"
                     
                     paper = ArxivPaper(
-                        arxiv_id=arxiv_id,
+                        arxiv_id=arxiv_id_base,
                         title=title,
                         authors=authors,
                         abstract=abstract,
