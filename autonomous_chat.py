@@ -1,5 +1,6 @@
 import asyncio
 import random
+import json
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -24,6 +25,54 @@ class AutonomousChat:
         # Quirky behavior settings
         self.quirk_chance = 0.10  # 10% chance for quirky behavior
         self.user_phrase_cache: List[str] = []  # Cache of user phrases to echo
+        
+        # Persistence
+        self.settings_file = Path("store") / "autonomous_chat_settings.json"
+        self.settings_file.parent.mkdir(exist_ok=True)
+        self.load_settings()
+    
+    def load_settings(self):
+        """Load persistent settings from file."""
+        try:
+            if self.settings_file.exists():
+                with open(self.settings_file, 'r') as f:
+                    settings = json.load(f)
+                
+                self.enabled_rooms = settings.get('enabled_rooms', {})
+                
+                # Load other settings if they exist
+                if 'min_response_interval_minutes' in settings:
+                    self.min_response_interval = timedelta(minutes=settings['min_response_interval_minutes'])
+                if 'spontaneous_check_interval_minutes' in settings:
+                    self.spontaneous_check_interval = timedelta(minutes=settings['spontaneous_check_interval_minutes'])
+                if 'max_history_length' in settings:
+                    self.max_history_length = settings['max_history_length']
+                if 'quirk_chance' in settings:
+                    self.quirk_chance = settings['quirk_chance']
+                
+                print(f"Loaded autonomous chat settings: {len(self.enabled_rooms)} room settings")
+                
+        except Exception as e:
+            print(f"Warning: Error loading autonomous chat settings: {e}")
+            # Continue with defaults if loading fails
+
+    def save_settings(self):
+        """Save persistent settings to file."""
+        try:
+            settings = {
+                'enabled_rooms': self.enabled_rooms,
+                'min_response_interval_minutes': self.min_response_interval.total_seconds() / 60,
+                'spontaneous_check_interval_minutes': self.spontaneous_check_interval.total_seconds() / 60,
+                'max_history_length': self.max_history_length,
+                'quirk_chance': self.quirk_chance,
+                'last_updated': datetime.now(timezone.utc).isoformat()
+            }
+            
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+                
+        except Exception as e:
+            print(f"Error saving autonomous chat settings: {e}")
     
     def is_enabled_in_room(self, room_id: str) -> bool:
         """Check if autonomous chat is enabled in a specific room. Default is True."""
@@ -32,14 +81,29 @@ class AutonomousChat:
     def enable_room(self, room_id: str) -> None:
         """Enable autonomous chat in a specific room."""
         self.enabled_rooms[room_id] = True
+        self.save_settings()
     
     def disable_room(self, room_id: str) -> None:
         """Disable autonomous chat in a specific room."""
         self.enabled_rooms[room_id] = False
+        self.save_settings()
     
     def get_room_status(self) -> Dict[str, bool]:
         """Get the status of all rooms."""
         return self.enabled_rooms.copy()
+    
+    def update_settings(self, **kwargs):
+        """Update chat settings and save them."""
+        if 'min_response_interval' in kwargs:
+            self.min_response_interval = kwargs['min_response_interval']
+        if 'spontaneous_check_interval' in kwargs:
+            self.spontaneous_check_interval = kwargs['spontaneous_check_interval']
+        if 'max_history_length' in kwargs:
+            self.max_history_length = max(1, min(50, kwargs['max_history_length']))  # Clamp between 1-50
+        if 'quirk_chance' in kwargs:
+            self.quirk_chance = max(0.0, min(1.0, kwargs['quirk_chance']))  # Clamp between 0-1
+        
+        self.save_settings()
     
     def add_message_to_history(self, room_id: str, sender: str, content: str, timestamp: Optional[datetime] = None):
         """Add a message to the conversation history for a room."""

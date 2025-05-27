@@ -4,7 +4,6 @@ from baml_client.sync_client import b
 import os
 from pathlib import Path
 import asyncio
-from datetime import timedelta
 
 class BotCommands(niobot.Module):
     def __init__(self, bot):
@@ -179,6 +178,7 @@ class BotCommands(niobot.Module):
         !chat_settings interval <minutes> - Set minimum response interval
         !chat_settings spontaneous <minutes> - Set spontaneous check interval
         !chat_settings history <number> - Set conversation history length
+        !chat_settings quirk <percentage> - Set quirk chance (0-100)
         """
         autonomous_chat = self.get_autonomous_chat()
         if not autonomous_chat:
@@ -188,42 +188,81 @@ class BotCommands(niobot.Module):
             return
         
         if action == "status":
-            response = f"""Autonomous Chat Settings:
+            # Get room settings summary
+            room_settings = autonomous_chat.get_room_status()
+            enabled_count = sum(1 for enabled in room_settings.values() if enabled)
+            disabled_count = len(room_settings) - enabled_count
+            
+            response = f"""🤖 **Autonomous Chat Settings:**
 - Response interval: {autonomous_chat.min_response_interval.total_seconds() / 60:.1f} minutes
 - Spontaneous check: {autonomous_chat.spontaneous_check_interval.total_seconds() / 60:.1f} minutes  
 - History length: {autonomous_chat.max_history_length} messages
-- Rooms with history: {len(autonomous_chat.conversation_history)}"""
+- Quirk chance: {autonomous_chat.quirk_chance * 100:.0f}%
+- Rooms with history: {len(autonomous_chat.conversation_history)}
+
+📋 **Room Settings:**
+- Explicitly enabled: {enabled_count} rooms
+- Explicitly disabled: {disabled_count} rooms
+- Default for new rooms: Enabled
+
+💾 Settings are automatically saved and persist across bot restarts."""
             
         elif action == "interval" and value:
             try:
                 minutes = float(value)
-                autonomous_chat.min_response_interval = timedelta(minutes=minutes)
-                response = f"Set minimum response interval to {minutes} minutes"
+                if minutes < 0.1:
+                    response = "Interval must be at least 0.1 minutes (6 seconds)"
+                else:
+                    from datetime import timedelta
+                    autonomous_chat.update_settings(min_response_interval=timedelta(minutes=minutes))
+                    response = f"✅ Set minimum response interval to {minutes} minutes (saved)"
             except ValueError:
-                response = "Invalid number for interval"
+                response = "❌ Invalid number for interval"
                 
         elif action == "spontaneous" and value:
             try:
                 minutes = float(value)
-                autonomous_chat.spontaneous_check_interval = timedelta(minutes=minutes)
-                response = f"Set spontaneous check interval to {minutes} minutes"
+                if minutes < 1:
+                    response = "Spontaneous interval must be at least 1 minute"
+                else:
+                    from datetime import timedelta
+                    autonomous_chat.update_settings(spontaneous_check_interval=timedelta(minutes=minutes))
+                    response = f"✅ Set spontaneous check interval to {minutes} minutes (saved)"
             except ValueError:
-                response = "Invalid number for spontaneous interval"
+                response = "❌ Invalid number for spontaneous interval"
                 
         elif action == "history" and value:
             try:
                 length = int(value)
-                autonomous_chat.max_history_length = max(1, min(50, length))  # Limit between 1-50
-                response = f"Set conversation history length to {autonomous_chat.max_history_length} messages"
+                if length < 1 or length > 50:
+                    response = "History length must be between 1 and 50 messages"
+                else:
+                    autonomous_chat.update_settings(max_history_length=length)
+                    response = f"✅ Set conversation history length to {length} messages (saved)"
             except ValueError:
-                response = "Invalid number for history length"
+                response = "❌ Invalid number for history length"
+                
+        elif action == "quirk" and value:
+            try:
+                percentage = float(value)
+                if percentage < 0 or percentage > 100:
+                    response = "Quirk chance must be between 0 and 100 percent"
+                else:
+                    quirk_chance = percentage / 100.0
+                    autonomous_chat.update_settings(quirk_chance=quirk_chance)
+                    response = f"✅ Set quirk chance to {percentage}% (saved)"
+            except ValueError:
+                response = "❌ Invalid number for quirk percentage"
                 
         else:
             response = """Usage:
 !chat_settings status - Show current settings
 !chat_settings interval <minutes> - Set response interval (e.g., 2.5)
 !chat_settings spontaneous <minutes> - Set spontaneous check interval
-!chat_settings history <number> - Set history length (1-50)"""
+!chat_settings history <number> - Set history length (1-50)
+!chat_settings quirk <percentage> - Set quirk chance (0-100)
+
+All settings are automatically saved and persist across bot restarts."""
         
         await ctx.respond(response)
         self._log_bot_response(ctx, response)
@@ -273,7 +312,7 @@ class BotCommands(niobot.Module):
         room_name = ctx.room.display_name or ctx.room.name if not room_id else room_id
         
         autonomous_chat.enable_room(target_room_id)
-        response = f"Enabled autonomous chat in {room_name}"
+        response = f"✅ Enabled autonomous chat in {room_name} (saved)"
         await ctx.respond(response)
         self._log_bot_response(ctx, response)
 
@@ -292,7 +331,32 @@ class BotCommands(niobot.Module):
         room_name = ctx.room.display_name or ctx.room.name if not room_id else room_id
         
         autonomous_chat.disable_room(target_room_id)
-        response = f"Disabled autonomous chat in {room_name}"
+        response = f"✅ Disabled autonomous chat in {room_name} (saved)"
+        await ctx.respond(response)
+        self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def chat_reset(self, ctx: niobot.Context, room_id: str = ""):
+        """Reset a room to default chat settings (remove explicit enable/disable). Owner only."""
+        autonomous_chat = self.get_autonomous_chat()
+        if not autonomous_chat:
+            response = "❌ Autonomous chat not available"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            return
+        
+        target_room_id = room_id if room_id else ctx.room.room_id
+        room_name = ctx.room.display_name or ctx.room.name if not room_id else room_id
+        
+        # Remove the room from explicit settings
+        if target_room_id in autonomous_chat.enabled_rooms:
+            del autonomous_chat.enabled_rooms[target_room_id]
+            autonomous_chat.save_settings()
+            response = f"✅ Reset {room_name} to default chat settings (enabled)"
+        else:
+            response = f"ℹ️ {room_name} already uses default settings"
+        
         await ctx.respond(response)
         self._log_bot_response(ctx, response)
 
@@ -368,10 +432,13 @@ class BotCommands(niobot.Module):
         """
         try:
             # Import the tracker (lazy import to avoid startup issues)
-            import sys
-            import os
-            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-            from arxiv_tracker import ArxivAltmetricTracker
+            try:
+                from arxiv_tracker import ArxivAltmetricTracker
+            except ImportError:
+                response = "❌ ArXiv tracker not available. Missing dependencies or module not installed."
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
             
             # Validate parameters
             days = max(1, min(days, 30))  # Limit to 1-30 days
@@ -382,10 +449,12 @@ class BotCommands(niobot.Module):
             self._log_bot_response(ctx, response)
             
             # Initialize tracker and fetch papers
-            tracker = ArxivAltmetricTracker()
-            
-            # Fetch recent papers
-            papers = await tracker.fetch_recent_papers(days_back=days, max_results=50)
+            async with ArxivAltmetricTracker() as tracker:
+                papers = await tracker.get_trending_papers(
+                    days_back=days,
+                    count=count,
+                    include_altmetric=True
+                )
             
             if not papers:
                 response = "❌ No AI papers found in the specified time range."
@@ -393,31 +462,13 @@ class BotCommands(niobot.Module):
                 self._log_bot_response(ctx, response)
                 return
             
-            # Enrich with Altmetric data
-            papers = await tracker.enrich_with_altmetric(papers)
-            
-            # Rank by popularity
-            ranked_papers = tracker.rank_papers_by_popularity(papers)
-            
-            # Get top papers
-            top_papers = ranked_papers[:count]
-            
-            if not top_papers:
-                response = "❌ No papers found with ranking data."
-                await ctx.respond(response)
-                self._log_bot_response(ctx, response)
-                return
-            
-            # Format response
-            header = f"🤖 **Top {len(top_papers)} Trending AI Papers** (Last {days} days)\n"
-            header += f"📊 Found {len(papers)} total papers\n\n"
-            
-            # Send header
+            # Format and send results
+            header = f"🤖 **Top {len(papers)} Trending AI Papers** (Last {days} days)\n\n"
             await ctx.respond(header)
             self._log_bot_response(ctx, header)
             
             # Send each paper as a separate message to avoid length limits
-            for i, paper in enumerate(top_papers, 1):
+            for i, paper in enumerate(papers, 1):
                 paper_summary = self._format_paper_for_matrix(paper, i)
                 await ctx.respond(paper_summary)
                 self._log_bot_response(ctx, f"Paper #{i}: {paper.title[:50]}...")
@@ -426,18 +477,14 @@ class BotCommands(niobot.Module):
                 await asyncio.sleep(0.5)
             
             # Summary message
-            summary = f"\n📈 **Summary**: Displayed top {len(top_papers)} papers out of {len(papers)} found"
-            if any(p.altmetric_score and p.altmetric_score > 0 for p in top_papers):
-                avg_score = sum(p.altmetric_score or 0 for p in top_papers) / len(top_papers)
+            summary = f"\n📈 **Summary**: Displayed top {len(papers)} papers"
+            if any(p.altmetric_score and p.altmetric_score > 0 for p in papers):
+                avg_score = sum(p.altmetric_score or 0 for p in papers) / len(papers)
                 summary += f"\n📊 Average Altmetric score: {avg_score:.1f}"
             
             await ctx.respond(summary)
             self._log_bot_response(ctx, summary)
             
-        except ImportError as e:
-            response = f"❌ Error: ArXiv tracker not available. Missing dependencies: {str(e)}"
-            await ctx.respond(response)
-            self._log_bot_response(ctx, response)
         except Exception as e:
             response = f"❌ Error fetching AI papers: {str(e)}"
             await ctx.respond(response)
@@ -445,8 +492,6 @@ class BotCommands(niobot.Module):
     
     def _format_paper_for_matrix(self, paper, rank: int) -> str:
         """Format a paper for Matrix display with proper markdown."""
-        from arxiv_tracker import ArxivPaper
-        
         # Truncate title for readability
         title = paper.title[:80] + "..." if len(paper.title) > 80 else paper.title
         
@@ -516,6 +561,7 @@ class BotCommands(niobot.Module):
             
             response = f"""📊 **ArXiv Auto-Poster Status**
 
+**Enabled**: {status['enabled']}
 **Queue**: {status['queue_size']} papers waiting
 **Posted**: {status['posted_total']} total papers
 **Today**: {status['posts_today']}/{status['max_posts_per_day']} posts
@@ -524,8 +570,8 @@ class BotCommands(niobot.Module):
 **Last Discovery**: {status['last_discovery'] or 'Never'}
 **Last Posting**: {status['last_posting'] or 'Never'}
 
-**Next Discovery**: {status['next_discovery']}
-**Next Posting**: {status['next_posting']}"""
+**Next Discovery**: {status['next_discovery'] or 'Not scheduled'}
+**Next Posting**: {status['next_posting'] or 'Not scheduled'}"""
             
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
@@ -543,6 +589,12 @@ class BotCommands(niobot.Module):
             auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
             if not auto_poster:
                 response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            if not auto_poster.enabled:
+                response = "❌ ArXiv auto-poster is disabled (missing dependencies)"
                 await ctx.respond(response)
                 self._log_bot_response(ctx, response)
                 return
@@ -572,6 +624,12 @@ class BotCommands(niobot.Module):
             auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
             if not auto_poster:
                 response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            if not auto_poster.enabled:
+                response = "❌ ArXiv auto-poster is disabled (missing dependencies)"
                 await ctx.respond(response)
                 self._log_bot_response(ctx, response)
                 return
@@ -626,7 +684,7 @@ class BotCommands(niobot.Module):
             
             for i, paper in enumerate(queue_papers, 1):
                 response += f"**#{i}. {paper.title[:60]}{'...' if len(paper.title) > 60 else ''}**\n"
-                response += f"   Priority: {paper.priority_score:.1f} | Altmetric: {paper.altmetric_score:.1f}\n"
+                response += f"   Priority: {paper.priority_score:.1f} | Altmetric: {paper.altmetric_score or 0:.1f}\n"
                 response += f"   Categories: {', '.join(paper.categories[:2])}\n"
                 response += f"   🔗 {paper.arxiv_url}\n\n"
             
@@ -661,6 +719,7 @@ class BotCommands(niobot.Module):
                 # Show current settings
                 response = f"""⚙️ **ArXiv Auto-Poster Configuration**
 
+**Enabled**: {auto_poster.enabled}
 **Target Channel**: {auto_poster.target_channel}
 **Max Posts/Day**: {auto_poster.max_posts_per_day}
 **Posting Interval**: {auto_poster.posting_interval.total_seconds() / 3600:.1f} hours
@@ -692,6 +751,7 @@ Use `!arxiv_config <setting> <value>` to change settings."""
                 try:
                     hours = float(value)
                     if 0.5 <= hours <= 24:
+                        from datetime import timedelta
                         auto_poster.posting_interval = timedelta(hours=hours)
                         response = f"✅ Posting interval set to: {hours} hours"
                     else:

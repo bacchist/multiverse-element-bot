@@ -7,21 +7,10 @@ from bot_commands import BotCommands
 from crawling import set_crawler
 from chat_logger import ChatLogger
 from autonomous_chat import AutonomousChat
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
-from pathlib import Path
-from arxiv_auto_poster import ArxivAutoPoster
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
-)
-
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, filename="bot.log")
 
 # Initialize chat logger
 chat_logger = ChatLogger()
@@ -57,10 +46,31 @@ bot.crawler = crawler  # Attach crawler to bot for module access  # type: ignore
 # Mount the bot commands module
 bot.mount_module("bot_commands")
 
-arxiv_auto_poster = ArxivAutoPoster(bot)
-
-# Attach auto-poster to bot for command access
-setattr(bot, 'arxiv_auto_poster', arxiv_auto_poster)
+# Optional ArXiv auto-poster integration
+try:
+    from arxiv_auto_poster import ArxivAutoPoster
+    
+    # Initialize auto-poster with default settings
+    arxiv_auto_poster = ArxivAutoPoster(
+        bot=bot,
+        target_channel="#ai-papers:themultiverse.school",  # Change this to your desired channel
+        max_posts_per_day=3,
+        posting_interval=timedelta(hours=6),
+        discovery_interval=timedelta(hours=8)
+    )
+    
+    # Attach auto-poster to bot for command access
+    setattr(bot, 'arxiv_auto_poster', arxiv_auto_poster)
+    
+    if arxiv_auto_poster.enabled:
+        print("✅ ArXiv auto-poster initialized and enabled")
+    else:
+        print("⚠️ ArXiv auto-poster initialized but disabled (missing dependencies)")
+        
+except ImportError as e:
+    print(f"ℹ️ ArXiv auto-poster not available: {e}")
+    # Set a disabled placeholder so commands can detect it's not available
+    setattr(bot, 'arxiv_auto_poster', None)
 
 @bot.on_event("ready")
 async def on_ready(_):
@@ -77,8 +87,11 @@ async def on_ready(_):
     # Start the periodic spontaneous message checker
     asyncio.create_task(autonomous_chat.periodic_spontaneous_check(bot))
     
-    # Start the arXiv auto-poster background task
-    asyncio.create_task(arxiv_maintenance_task())
+    # Start the arXiv auto-poster background task if available and enabled
+    auto_poster = getattr(bot, 'arxiv_auto_poster', None)
+    if auto_poster and auto_poster.enabled:
+        asyncio.create_task(arxiv_maintenance_task())
+        print("🤖 ArXiv auto-poster background task started")
 
 @bot.on_event("command")
 async def on_command(ctx):
@@ -262,35 +275,20 @@ async def on_room_member(room, event):
 
 async def arxiv_maintenance_task():
     """Background task for arXiv auto-poster maintenance."""
+    auto_poster = getattr(bot, 'arxiv_auto_poster', None)
+    if not auto_poster or not auto_poster.enabled:
+        return
+        
+    logger = logging.getLogger(__name__)
     logger.info("Starting arXiv maintenance task...")
     
     while True:
         try:
-            await arxiv_auto_poster.run_maintenance_cycle()
+            await auto_poster.run_maintenance_cycle()
         except Exception as e:
             logger.error(f"Error in arXiv maintenance cycle: {e}")
         
         # Wait 30 minutes before next check
         await asyncio.sleep(30 * 60)
 
-async def main():
-    """Main bot function."""
-    try:
-        # Login
-        logger.info("Logging in...")
-        await bot.login(bot_config.ACCESS_TOKEN)
-        
-        # Start the bot
-        logger.info("Starting bot...")
-        await bot.sync_forever()
-        
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Bot error: {e}")
-        raise
-    finally:
-        await bot.close()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+bot.run(access_token=bot_config.ACCESS_TOKEN)

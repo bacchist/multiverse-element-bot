@@ -60,26 +60,40 @@ Use `!chat_settings` to configure autonomous behavior:
 !chat_settings interval 3.0             # Set minimum response interval (minutes)
 !chat_settings spontaneous 20           # Set spontaneous check interval (minutes)
 !chat_settings history 15               # Set conversation history length (1-50 messages)
+!chat_settings quirk 10                 # Set quirk chance percentage (0-100)
 ```
+
+All settings are automatically saved and persist across bot restarts.
 
 ### Per-Room Chat Controls
 
-The owner can enable or disable autonomous chat on a per-room basis:
+The owner can enable or disable autonomous chat on a per-room basis with persistent settings:
 
 ```
 !chat_enable                            # Enable autonomous chat in current room
 !chat_enable !room:example.com          # Enable autonomous chat in specific room
 !chat_disable                           # Disable autonomous chat in current room  
 !chat_disable !room:example.com         # Disable autonomous chat in specific room
-!chat_status                            # Show status for all rooms
+!chat_reset                             # Reset current room to default settings
+!chat_reset !room:example.com           # Reset specific room to default settings
+!list_rooms                             # Show all rooms with their chat status
 ```
 
-**Default Behavior**: Autonomous chat is enabled by default in all rooms. Once you use `!chat_enable` or `!chat_disable` in a room, that setting is remembered.
+**Persistent Settings**: All room chat preferences are automatically saved to `store/autonomous_chat_settings.json` and persist across bot restarts. This means:
+
+- Once you enable/disable chat in a room, that setting is remembered permanently
+- The bot will maintain these preferences even after restarting
+- Settings are saved immediately when you use `!chat_enable` or `!chat_disable`
+
+**Default Behavior**: Autonomous chat is enabled by default in all rooms. Only rooms where you've explicitly used `!chat_enable` or `!chat_disable` have stored preferences.
 
 **Use Cases**:
 - Disable in busy public rooms where the bot might be disruptive
 - Enable only in specific project or discussion rooms
 - Temporarily disable during meetings or focused work sessions
+- Reset rooms back to default behavior with `!chat_reset`
+
+**Settings Management**: The `!chat_settings` command also saves all configuration changes (response intervals, history length, etc.) persistently.
 
 ## Chat Logging
 

@@ -33,6 +33,10 @@ class LoreHint {
   classification string @description("Type of hint: containment, memory, system, entity, temporal, etc.")
 }
 
+class PaperComment {
+  comment string @description("A thoughtful, engaging comment about the research paper")
+}
+
 function ShouldRespondToConversation(context: ConversationContext, new_message: Message) -> ResponseDecision {
   client CustomGPT41Nano
   prompt #"
@@ -230,10 +234,6 @@ function GenerateContextualLoreHint(context: ConversationContext, current_messag
 
     {{ ctx.output_format }}
   "#
-}
-
-class PaperComment {
-  comment string @description("A thoughtful, engaging comment about the research paper")
 }
 
 function GeneratePaperComment(title: string, authors: string, abstract: string, categories: string, altmetric_info: string, context: string) -> PaperComment {
