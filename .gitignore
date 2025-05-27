@@ -25,6 +25,7 @@ bot.log
 urls.txt
 article.txt
 store/
+chat_logs/
 
 # Environment and secrets
 config.py
