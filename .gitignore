@@ -29,6 +29,7 @@ chat_logs/
 
 # Environment and secrets
 config.py
+bot_config.py
 .env
 .env.*
 *.key
