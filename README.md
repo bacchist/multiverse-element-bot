@@ -297,4 +297,13 @@ The system uses sophisticated filtering to ensure only truly trending papers are
 
 **Target Channel**: Papers are posted to `#ai-papers:themultiverse.school`
 
+**Post Format**: Posts are concise and focused:
+```
+🤖 **Attention Is All You Need** (🔥 Trending: 15 Altmetric score)
+
+This transformer architecture eliminates recurrence entirely - parallel training with better long-range dependencies than RNNs.
+
+🔗 https://arxiv.org/abs/1706.03762
+```
+
 **Automatic Operation**: The bot runs maintenance cycles every 6 hours to discover new papers and posts up to 5 papers per day with 4-hour intervals between posts.

@@ -492,56 +492,61 @@ All settings are automatically saved and persist across bot restarts."""
     
     def _format_paper_for_matrix(self, paper, rank: int) -> str:
         """Format a paper for Matrix display with proper markdown."""
-        # Truncate title for readability
-        title = paper.title[:80] + "..." if len(paper.title) > 80 else paper.title
-        
-        # Format authors (show first 3)
-        if len(paper.authors) <= 3:
-            authors_str = ", ".join(paper.authors)
-        else:
-            authors_str = ", ".join(paper.authors[:3]) + f" et al. ({len(paper.authors)} total)"
-        
-        # Truncate authors if too long
-        if len(authors_str) > 100:
-            authors_str = authors_str[:97] + "..."
-        
-        # Altmetric info
-        altmetric_info = ""
-        if paper.altmetric_score and paper.altmetric_score > 0:
-            altmetric_info = f"📊 Altmetric: **{paper.altmetric_score:.1f}**"
+        # Add trending context if noteworthy
+        trending_context = ""
+        if paper.altmetric_score and paper.altmetric_score >= 5.0:
+            trending_context = f" (🔥 Trending: {paper.altmetric_score:.0f} Altmetric score)"
+        elif paper.altmetric_data:
+            tweets = paper.altmetric_data.get('cited_by_tweeters_count', 0)
+            reddit = paper.altmetric_data.get('cited_by_rdts_count', 0)
+            news = paper.altmetric_data.get('cited_by_feeds_count', 0)
             
-            if paper.altmetric_data:
-                mentions = []
-                if paper.altmetric_data.get('cited_by_tweeters_count', 0) > 0:
-                    mentions.append(f"{paper.altmetric_data['cited_by_tweeters_count']} tweets")
-                if paper.altmetric_data.get('cited_by_posts_count', 0) > 0:
-                    mentions.append(f"{paper.altmetric_data['cited_by_posts_count']} posts")
-                if paper.altmetric_data.get('cited_by_rdts_count', 0) > 0:
-                    mentions.append(f"{paper.altmetric_data['cited_by_rdts_count']} Reddit")
-                
-                if mentions:
-                    altmetric_info += f" ({', '.join(mentions)})"
-        else:
-            altmetric_info = "📊 Altmetric: No data"
+            if tweets >= 10:
+                trending_context = f" (🐦 {tweets} tweets)"
+            elif reddit >= 3:
+                trending_context = f" (🔴 Popular on Reddit)"
+            elif news >= 2:
+                trending_context = f" (📰 News coverage)"
         
-        # Categories (show main AI categories only)
-        ai_categories = ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE", "stat.ML"]
-        main_categories = [cat for cat in paper.categories if cat in ai_categories]
-        categories_str = ", ".join(main_categories[:2])  # Show max 2 categories
+        # Generate a brief insight about the paper
+        try:
+            from baml_client.sync_client import b
+            
+            authors_str = ", ".join(paper.authors[:2])
+            categories_str = ", ".join(paper.categories[:2])
+            
+            trending_info = ""
+            if paper.altmetric_score and paper.altmetric_score >= 5.0:
+                trending_info = f"High social engagement (Altmetric: {paper.altmetric_score:.1f}). "
+            
+            result = b.GeneratePaperComment(
+                title=paper.title,
+                authors=authors_str,
+                abstract=paper.abstract[:400],
+                categories=categories_str,
+                altmetric_info=trending_info,
+                context="Generate a concise, insightful comment (1-2 sentences) about why this research is interesting or significant."
+            )
+            
+            comment = result.comment
+            
+        except Exception:
+            # Fallback comment
+            if any(cat in ['cs.AI', 'cs.LG'] for cat in paper.categories):
+                comment = "Interesting new approach in AI/ML research."
+            elif 'cs.CL' in paper.categories:
+                comment = "New developments in natural language processing."
+            elif 'cs.CV' in paper.categories:
+                comment = "Novel computer vision research with potential applications."
+            else:
+                comment = "New research gaining attention in the AI community."
         
-        # Truncate abstract
-        abstract = paper.abstract[:150] + "..." if len(paper.abstract) > 150 else paper.abstract
-        
-        # Format the message
-        message = f"""**#{rank}. {title}**
+        # Format the message concisely
+        message = f"""**#{rank}. {paper.title}**{trending_context}
 
-👥 {authors_str}
-📅 {paper.published.strftime('%Y-%m-%d')} | 🏷️ {categories_str}
-{altmetric_info}
+{comment}
 
-{abstract}
-
-🔗 [arXiv]({paper.arxiv_url}) | [PDF]({paper.pdf_url})"""
+🔗 {paper.arxiv_url}"""
         
         return message
 

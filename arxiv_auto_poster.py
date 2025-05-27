@@ -338,90 +338,78 @@ class ArxivAutoPoster:
             logger.error(f"Error posting paper: {e}")
             return False
 
-    def _format_paper_for_posting(self, paper: ArxivPaper) -> str:
+    def _format_paper_for_posting(self, paper: 'ArxivPaper') -> str:
         """Format a paper for posting to Matrix."""
-        # Truncate title if too long
-        title = paper.title[:100] + "..." if len(paper.title) > 100 else paper.title
-        
-        # Format authors (show first 3)
-        if len(paper.authors) <= 3:
-            authors_str = ", ".join(paper.authors)
-        else:
-            authors_str = ", ".join(paper.authors[:3]) + f" et al. ({len(paper.authors)} total)"
-        
-        # Truncate authors if too long
-        if len(authors_str) > 120:
-            authors_str = authors_str[:117] + "..."
-        
-        # Categories (show main AI categories only)
-        ai_categories = ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE", "stat.ML"]
-        main_categories = [cat for cat in paper.categories if cat in ai_categories]
-        categories_str = ", ".join(main_categories[:2])
-        
-        # Altmetric info
-        altmetric_info = ""
-        if paper.altmetric_score and paper.altmetric_score > 0:
-            altmetric_info = f"📊 Altmetric: **{paper.altmetric_score:.1f}**"
-            
-            if paper.altmetric_data:
-                mentions = []
-                if paper.altmetric_data.get('cited_by_tweeters_count', 0) > 0:
-                    mentions.append(f"{paper.altmetric_data['cited_by_tweeters_count']} tweets")
-                if paper.altmetric_data.get('cited_by_posts_count', 0) > 0:
-                    mentions.append(f"{paper.altmetric_data['cited_by_posts_count']} posts")
-                
-                if mentions:
-                    altmetric_info += f" ({', '.join(mentions)})"
-        
-        # Truncate abstract
-        abstract = paper.abstract[:200] + "..." if len(paper.abstract) > 200 else paper.abstract
-        
-        # Generate comment using BAML if available
+        # Generate insightful comment using BAML
         comment = self._generate_paper_comment(paper)
         
-        # Format the message
-        message = f"""🤖 **Trending AI Paper**
-
-**{title}**
+        # Add Altmetric context if it's particularly noteworthy
+        trending_context = ""
+        if paper.altmetric_score and paper.altmetric_score >= 5.0:
+            trending_context = f" (🔥 Trending: {paper.altmetric_score:.0f} Altmetric score)"
+        elif paper.altmetric_data:
+            # Check for notable social engagement
+            tweets = paper.altmetric_data.get('cited_by_tweeters_count', 0)
+            reddit = paper.altmetric_data.get('cited_by_rdts_count', 0)
+            news = paper.altmetric_data.get('cited_by_feeds_count', 0)
+            
+            if tweets >= 10:
+                trending_context = f" (🐦 {tweets} tweets)"
+            elif reddit >= 3:
+                trending_context = f" (🔴 Popular on Reddit)"
+            elif news >= 2:
+                trending_context = f" (📰 News coverage)"
+        
+        # Simple, concise format
+        message = f"""🤖 **{paper.title}**{trending_context}
 
 {comment}
 
-👥 {authors_str}
-📅 {paper.published.strftime('%Y-%m-%d')} | 🏷️ {categories_str}
-{altmetric_info}
-
-{abstract}
-
-🔗 [arXiv]({paper.arxiv_url}) | [PDF]({paper.pdf_url})"""
+🔗 {paper.arxiv_url}"""
         
         return message
 
-    def _generate_paper_comment(self, paper: ArxivPaper) -> str:
+    def _generate_paper_comment(self, paper: 'ArxivPaper') -> str:
         """Generate a thoughtful comment about the paper using BAML."""
         try:
             # Try to use BAML for comment generation
             from baml_client.sync_client import b
             
-            # Prepare context
-            authors_str = ", ".join(paper.authors[:3])
-            categories_str = ", ".join(paper.categories[:3])
-            altmetric_info = f"Altmetric score: {paper.altmetric_score:.1f}" if paper.altmetric_score else "No Altmetric data"
+            # Prepare context for more insightful comments
+            authors_str = ", ".join(paper.authors[:2])  # Just first 2 authors
+            categories_str = ", ".join(paper.categories[:2])
+            
+            # Focus on what makes this paper interesting/trending
+            trending_info = ""
+            if paper.altmetric_score and paper.altmetric_score >= 5.0:
+                trending_info = f"High social engagement (Altmetric: {paper.altmetric_score:.1f}). "
+            elif paper.altmetric_data:
+                tweets = paper.altmetric_data.get('cited_by_tweeters_count', 0)
+                if tweets >= 5:
+                    trending_info = f"Getting attention on social media ({tweets} tweets). "
             
             result = b.GeneratePaperComment(
                 title=paper.title,
                 authors=authors_str,
-                abstract=paper.abstract[:500],  # Truncate for API limits
+                abstract=paper.abstract[:400],  # Slightly longer for better context
                 categories=categories_str,
-                altmetric_info=altmetric_info,
-                context="Sharing with AI research community at The Multiverse School"
+                altmetric_info=trending_info,
+                context="Generate a concise, insightful comment (1-2 sentences) about why this research is interesting or significant. Focus on the key insight, potential impact, or novel approach rather than just describing what it does."
             )
             
             return result.comment
             
         except Exception as e:
             logger.debug(f"Could not generate comment with BAML: {e}")
-            # Fallback to simple comment
-            return "New research worth checking out from the AI community."
+            # Fallback to simple comment based on categories
+            if any(cat in ['cs.AI', 'cs.LG'] for cat in paper.categories):
+                return "Interesting new approach in AI/ML research worth checking out."
+            elif 'cs.CL' in paper.categories:
+                return "New developments in natural language processing."
+            elif 'cs.CV' in paper.categories:
+                return "Novel computer vision research with potential applications."
+            else:
+                return "New research that's gaining attention in the AI community."
 
     def get_status(self) -> Dict[str, Any]:
         """Get current status of the auto-poster."""
