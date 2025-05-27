@@ -269,8 +269,12 @@ class ArxivAutoPoster:
                     if news >= 1: engagement.append(f"{news} news")
                     reasons.append(f"Social engagement: {', '.join(engagement)}")
             
-            # Criterion 3: Very high priority score (even without Altmetric)
-            # This catches very recent papers in hot AI categories
+            # Criterion 3: Any Altmetric data (even minimal social attention)
+            elif paper.altmetric_score and paper.altmetric_score > 0:
+                is_trending = True
+                reasons.append(f"Has social attention (Altmetric: {paper.altmetric_score:.1f})")
+            
+            # Criterion 4: Very high priority score (recent papers in hot AI categories)
             elif paper.priority_score >= 80.0:
                 is_trending = True
                 reasons.append(f"High priority score ({paper.priority_score:.1f})")
@@ -283,14 +287,25 @@ class ArxivAutoPoster:
                     if any(cat in paper.categories for cat in hot_categories):
                         reasons.append(f"Recent paper ({hours_old:.1f}h old) in hot category")
             
-            # Criterion 4: Papers with any Altmetric data in very recent timeframe
-            # (catches breaking papers that just started getting attention)
-            elif paper.altmetric_score and paper.altmetric_score > 0:
+            # Criterion 5: Quality papers in top AI venues/categories (fallback for when no Altmetric data)
+            elif not any(p.altmetric_score and p.altmetric_score > 0 for p in papers):
+                # Only use this fallback when NO papers have Altmetric data
                 from datetime import datetime, timezone
                 hours_old = (datetime.now(timezone.utc) - paper.published).total_seconds() / 3600
+                
+                # Very recent papers in premium AI categories
                 if hours_old < 24:
-                    is_trending = True
-                    reasons.append(f"Recent paper with emerging attention (Altmetric: {paper.altmetric_score:.1f})")
+                    premium_categories = ['cs.AI', 'cs.LG']
+                    if any(cat in paper.categories for cat in premium_categories):
+                        is_trending = True
+                        reasons.append(f"Recent premium AI paper ({hours_old:.1f}h old)")
+                
+                # Or papers with high priority scores in any AI category
+                elif paper.priority_score >= 60.0:
+                    ai_categories = ['cs.AI', 'cs.LG', 'cs.CL', 'cs.CV', 'cs.NE', 'stat.ML']
+                    if any(cat in paper.categories for cat in ai_categories):
+                        is_trending = True
+                        reasons.append(f"Quality AI paper (Priority: {paper.priority_score:.1f})")
             
             if is_trending:
                 trending_papers.append(paper)
@@ -300,6 +315,13 @@ class ArxivAutoPoster:
         
         # Sort by priority score to ensure best papers are posted first
         trending_papers.sort(key=lambda p: p.priority_score, reverse=True)
+        
+        # If we still have no papers, take the top 3 by priority score as a last resort
+        if not trending_papers and papers:
+            logger.info("No papers met trending criteria, falling back to top papers by priority")
+            trending_papers = sorted(papers, key=lambda p: p.priority_score, reverse=True)[:3]
+            for paper in trending_papers:
+                logger.debug(f"✅ Fallback: {paper.title[:50]}... (Priority: {paper.priority_score:.1f})")
         
         return trending_papers
 

@@ -279,8 +279,12 @@ The system uses sophisticated filtering to ensure only truly trending papers are
 
 **🏆 Tier 1 - High Impact:** Papers with Altmetric score ≥ 5.0
 **📱 Tier 2 - Social Engagement:** Papers with Altmetric ≥ 2.0 AND social activity (3+ tweets, 1+ Reddit, or news coverage)  
-**⚡ Tier 3 - Hot & Recent:** Very recent papers (<12h) in hot AI categories with priority score ≥ 80
-**🌟 Tier 4 - Emerging:** Papers <24h old with any Altmetric attention
+**🌟 Tier 3 - Any Social Attention:** Any Altmetric score >0 (even minimal engagement)
+**⚡ Tier 4 - Hot & Recent:** Very recent papers (<12h) in hot AI categories with priority score ≥ 80
+**🎯 Tier 5 - Quality Fallback:** Recent papers (<24h) in premium categories or quality AI papers with priority ≥ 60
+**🛡️ Last Resort:** Top 3 papers by priority score if no others qualify
+
+This ensures the queue always has quality papers while prioritizing those with genuine trending signals.
 
 ### Commands
 

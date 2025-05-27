@@ -944,13 +944,19 @@ Papers must meet **at least one** of these criteria to be queued for posting:
   - 1+ Reddit mentions, OR  
   - 1+ news coverage
 
-**⚡ Tier 3 - Hot & Recent:**
+**🌟 Tier 3 - Any Social Attention:**
+• Any Altmetric score >0 (even minimal social engagement)
+
+**⚡ Tier 4 - Hot & Recent:**
 • Priority score ≥ 80.0 (very recent papers in hot AI categories)
 • Papers <12 hours old in cs.AI, cs.LG, cs.CL, cs.CV
 
-**🌟 Tier 4 - Emerging Attention:**
-• Any Altmetric score >0 for papers <24 hours old
-• (Catches breaking papers just getting attention)
+**🎯 Tier 5 - Quality Fallback (when no Altmetric data available):**
+• Recent papers (<24h) in premium categories (cs.AI, cs.LG)
+• Quality AI papers with priority score ≥ 60.0
+
+**🛡️ Last Resort:**
+• If no papers meet criteria, top 3 papers by priority score
 
 **📊 Priority Score Calculation:**
 • Altmetric score × 10-20 (exponential scaling)
@@ -958,7 +964,7 @@ Papers must meet **at least one** of these criteria to be queued for posting:
 • Category bonus: cs.AI(25), cs.LG(20), cs.CL/CV(15)
 • Social engagement: tweets(2pt each), Reddit(5pt), news(10pt)
 
-This ensures only papers with genuine trending signals make it to the posting queue."""
+This ensures the queue always has papers while prioritizing those with genuine trending signals."""
             
             await ctx.respond(criteria)
             self._log_bot_response(ctx, criteria)
