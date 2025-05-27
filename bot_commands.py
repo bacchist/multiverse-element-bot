@@ -3,6 +3,8 @@ from niobot import FileAttachment
 from baml_client.sync_client import b
 import os
 from pathlib import Path
+import asyncio
+from datetime import timedelta
 
 class BotCommands(niobot.Module):
     def __init__(self, bot):
@@ -195,7 +197,6 @@ class BotCommands(niobot.Module):
         elif action == "interval" and value:
             try:
                 minutes = float(value)
-                from datetime import timedelta
                 autonomous_chat.min_response_interval = timedelta(minutes=minutes)
                 response = f"Set minimum response interval to {minutes} minutes"
             except ValueError:
@@ -204,7 +205,6 @@ class BotCommands(niobot.Module):
         elif action == "spontaneous" and value:
             try:
                 minutes = float(value)
-                from datetime import timedelta
                 autonomous_chat.spontaneous_check_interval = timedelta(minutes=minutes)
                 response = f"Set spontaneous check interval to {minutes} minutes"
             except ValueError:
@@ -355,4 +355,360 @@ class BotCommands(niobot.Module):
             response += f"   Status: {chat_status}\n\n"
         
         await ctx.respond(response)
-        self._log_bot_response(ctx, response) 
+        self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def trending_ai(self, ctx: niobot.Context, days: int = 3, count: int = 5):
+        """Fetch trending AI papers from arXiv ranked by Altmetric scores. Owner only.
+        
+        Usage:
+        !trending_ai - Get top 5 papers from last 3 days
+        !trending_ai 7 10 - Get top 10 papers from last 7 days
+        """
+        try:
+            # Import the tracker (lazy import to avoid startup issues)
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            from arxiv_tracker import ArxivAltmetricTracker
+            
+            # Validate parameters
+            days = max(1, min(days, 30))  # Limit to 1-30 days
+            count = max(1, min(count, 20))  # Limit to 1-20 papers
+            
+            response = f"🔍 Fetching trending AI papers from the last {days} days..."
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+            # Initialize tracker and fetch papers
+            tracker = ArxivAltmetricTracker()
+            
+            # Fetch recent papers
+            papers = await tracker.fetch_recent_papers(days_back=days, max_results=50)
+            
+            if not papers:
+                response = "❌ No AI papers found in the specified time range."
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            # Enrich with Altmetric data
+            papers = await tracker.enrich_with_altmetric(papers)
+            
+            # Rank by popularity
+            ranked_papers = tracker.rank_papers_by_popularity(papers)
+            
+            # Get top papers
+            top_papers = ranked_papers[:count]
+            
+            if not top_papers:
+                response = "❌ No papers found with ranking data."
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            # Format response
+            header = f"🤖 **Top {len(top_papers)} Trending AI Papers** (Last {days} days)\n"
+            header += f"📊 Found {len(papers)} total papers\n\n"
+            
+            # Send header
+            await ctx.respond(header)
+            self._log_bot_response(ctx, header)
+            
+            # Send each paper as a separate message to avoid length limits
+            for i, paper in enumerate(top_papers, 1):
+                paper_summary = self._format_paper_for_matrix(paper, i)
+                await ctx.respond(paper_summary)
+                self._log_bot_response(ctx, f"Paper #{i}: {paper.title[:50]}...")
+                
+                # Small delay to avoid rate limiting
+                await asyncio.sleep(0.5)
+            
+            # Summary message
+            summary = f"\n📈 **Summary**: Displayed top {len(top_papers)} papers out of {len(papers)} found"
+            if any(p.altmetric_score and p.altmetric_score > 0 for p in top_papers):
+                avg_score = sum(p.altmetric_score or 0 for p in top_papers) / len(top_papers)
+                summary += f"\n📊 Average Altmetric score: {avg_score:.1f}"
+            
+            await ctx.respond(summary)
+            self._log_bot_response(ctx, summary)
+            
+        except ImportError as e:
+            response = f"❌ Error: ArXiv tracker not available. Missing dependencies: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+        except Exception as e:
+            response = f"❌ Error fetching AI papers: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+    
+    def _format_paper_for_matrix(self, paper, rank: int) -> str:
+        """Format a paper for Matrix display with proper markdown."""
+        from arxiv_tracker import ArxivPaper
+        
+        # Truncate title for readability
+        title = paper.title[:80] + "..." if len(paper.title) > 80 else paper.title
+        
+        # Format authors (show first 3)
+        if len(paper.authors) <= 3:
+            authors_str = ", ".join(paper.authors)
+        else:
+            authors_str = ", ".join(paper.authors[:3]) + f" et al. ({len(paper.authors)} total)"
+        
+        # Truncate authors if too long
+        if len(authors_str) > 100:
+            authors_str = authors_str[:97] + "..."
+        
+        # Altmetric info
+        altmetric_info = ""
+        if paper.altmetric_score and paper.altmetric_score > 0:
+            altmetric_info = f"📊 Altmetric: **{paper.altmetric_score:.1f}**"
+            
+            if paper.altmetric_data:
+                mentions = []
+                if paper.altmetric_data.get('cited_by_tweeters_count', 0) > 0:
+                    mentions.append(f"{paper.altmetric_data['cited_by_tweeters_count']} tweets")
+                if paper.altmetric_data.get('cited_by_posts_count', 0) > 0:
+                    mentions.append(f"{paper.altmetric_data['cited_by_posts_count']} posts")
+                if paper.altmetric_data.get('cited_by_rdts_count', 0) > 0:
+                    mentions.append(f"{paper.altmetric_data['cited_by_rdts_count']} Reddit")
+                
+                if mentions:
+                    altmetric_info += f" ({', '.join(mentions)})"
+        else:
+            altmetric_info = "📊 Altmetric: No data"
+        
+        # Categories (show main AI categories only)
+        ai_categories = ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE", "stat.ML"]
+        main_categories = [cat for cat in paper.categories if cat in ai_categories]
+        categories_str = ", ".join(main_categories[:2])  # Show max 2 categories
+        
+        # Truncate abstract
+        abstract = paper.abstract[:150] + "..." if len(paper.abstract) > 150 else paper.abstract
+        
+        # Format the message
+        message = f"""**#{rank}. {title}**
+
+👥 {authors_str}
+📅 {paper.published.strftime('%Y-%m-%d')} | 🏷️ {categories_str}
+{altmetric_info}
+
+{abstract}
+
+🔗 [arXiv]({paper.arxiv_url}) | [PDF]({paper.pdf_url})"""
+        
+        return message
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_status(self, ctx: niobot.Context):
+        """Show status of the arXiv auto-poster. Owner only."""
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            status = auto_poster.get_status()
+            
+            response = f"""📊 **ArXiv Auto-Poster Status**
+
+**Queue**: {status['queue_size']} papers waiting
+**Posted**: {status['posted_total']} total papers
+**Today**: {status['posts_today']}/{status['max_posts_per_day']} posts
+**Target**: {status['target_channel']}
+
+**Last Discovery**: {status['last_discovery'] or 'Never'}
+**Last Posting**: {status['last_posting'] or 'Never'}
+
+**Next Discovery**: {status['next_discovery']}
+**Next Posting**: {status['next_posting']}"""
+            
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error getting auto-poster status: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_discover(self, ctx: niobot.Context, days: int = 3):
+        """Manually trigger arXiv paper discovery. Owner only."""
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            days = max(1, min(days, 30))  # Limit to 1-30 days
+            
+            response = f"🔍 Starting manual discovery for last {days} days..."
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+            new_papers = await auto_poster.discover_papers(days_back=days)
+            
+            response = f"✅ Discovery complete! Found {new_papers} new papers. Queue now has {len(auto_poster.queue)} papers."
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error during discovery: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_post(self, ctx: niobot.Context):
+        """Manually trigger posting the next paper from queue. Owner only."""
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            if not auto_poster.queue:
+                response = "📭 No papers in queue to post"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            response = f"📤 Posting next paper from queue..."
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+            success = await auto_poster.post_next_paper()
+            
+            if success:
+                response = f"✅ Paper posted successfully! Queue now has {len(auto_poster.queue)} papers remaining."
+            else:
+                response = f"❌ Failed to post paper. Check logs for details."
+            
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error posting paper: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_queue(self, ctx: niobot.Context, count: int = 5):
+        """Show papers in the posting queue. Owner only."""
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            if not auto_poster.queue:
+                response = "📭 Queue is empty"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            count = max(1, min(count, 10))  # Limit to 1-10 papers
+            queue_papers = auto_poster.queue[:count]
+            
+            response = f"📋 **Top {len(queue_papers)} Papers in Queue** (of {len(auto_poster.queue)} total)\n\n"
+            
+            for i, paper in enumerate(queue_papers, 1):
+                response += f"**#{i}. {paper.title[:60]}{'...' if len(paper.title) > 60 else ''}**\n"
+                response += f"   Priority: {paper.priority_score:.1f} | Altmetric: {paper.altmetric_score:.1f}\n"
+                response += f"   Categories: {', '.join(paper.categories[:2])}\n"
+                response += f"   🔗 {paper.arxiv_url}\n\n"
+            
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error showing queue: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_config(self, ctx: niobot.Context, setting: str = "", value: str = ""):
+        """Configure arXiv auto-poster settings. Owner only.
+        
+        Usage:
+        !arxiv_config - Show current settings
+        !arxiv_config channel #new-channel:server.com - Change target channel
+        !arxiv_config max_posts 3 - Set max posts per day
+        !arxiv_config interval 4 - Set posting interval in hours
+        """
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            if not setting:
+                # Show current settings
+                response = f"""⚙️ **ArXiv Auto-Poster Configuration**
+
+**Target Channel**: {auto_poster.target_channel}
+**Max Posts/Day**: {auto_poster.max_posts_per_day}
+**Posting Interval**: {auto_poster.posting_interval.total_seconds() / 3600:.1f} hours
+**Discovery Interval**: {auto_poster.discovery_interval.total_seconds() / 3600:.1f} hours
+
+Use `!arxiv_config <setting> <value>` to change settings."""
+                
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            # Update settings
+            if setting == "channel" and value:
+                auto_poster.target_channel = value
+                response = f"✅ Target channel set to: {value}"
+                
+            elif setting == "max_posts" and value:
+                try:
+                    max_posts = int(value)
+                    if 1 <= max_posts <= 20:
+                        auto_poster.max_posts_per_day = max_posts
+                        response = f"✅ Max posts per day set to: {max_posts}"
+                    else:
+                        response = "❌ Max posts must be between 1 and 20"
+                except ValueError:
+                    response = "❌ Invalid number for max posts"
+                    
+            elif setting == "interval" and value:
+                try:
+                    hours = float(value)
+                    if 0.5 <= hours <= 24:
+                        auto_poster.posting_interval = timedelta(hours=hours)
+                        response = f"✅ Posting interval set to: {hours} hours"
+                    else:
+                        response = "❌ Interval must be between 0.5 and 24 hours"
+                except ValueError:
+                    response = "❌ Invalid number for interval"
+                    
+            else:
+                response = """❌ Invalid setting. Available settings:
+- channel <#channel:server.com>
+- max_posts <1-20>
+- interval <0.5-24 hours>"""
+            
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error configuring auto-poster: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response) 

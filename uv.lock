@@ -803,6 +803,7 @@ name = "multiverse-element-bot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "baml-py" },
     { name = "crawl4ai" },
     { name = "feedgen" },
@@ -812,6 +813,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.11.0" },
     { name = "baml-py", specifier = "==0.86.1" },
     { name = "crawl4ai", specifier = ">=0.5.0.post8" },
     { name = "feedgen", specifier = ">=1.0.0" },

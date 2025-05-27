@@ -9,11 +9,28 @@ from chat_logger import ChatLogger
 from autonomous_chat import AutonomousChat
 from datetime import datetime, timezone
 import asyncio
+from pathlib import Path
+from arxiv_auto_poster import ArxivAutoPoster
 
-logging.basicConfig(level=logging.INFO, filename="bot.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 # Initialize chat logger
 chat_logger = ChatLogger()
+
+# Store bot startup time to ignore messages from before the bot started
+BOT_STARTUP_TIME = datetime.now(timezone.utc)
+
+# Flag to track if we've completed the first sync
+INITIAL_SYNC_COMPLETE = False
 
 bot = niobot.NioBot(
     homeserver=bot_config.HOMESERVER,
@@ -22,7 +39,8 @@ bot = niobot.NioBot(
     store_path='./store',
     command_prefix="!",
     owner_id=bot_config.OWNER_ID,
-    global_message_type="m.text"
+    global_message_type="m.text",
+    ignore_old_events=True  # Explicitly set this to ignore old events
 )
 
 # Initialize autonomous chat
@@ -39,9 +57,23 @@ bot.crawler = crawler  # Attach crawler to bot for module access  # type: ignore
 # Mount the bot commands module
 bot.mount_module("bot_commands")
 
+arxiv_auto_poster = ArxivAutoPoster(bot)
+
+# Attach auto-poster to bot for command access
+setattr(bot, 'arxiv_auto_poster', arxiv_auto_poster)
+
 @bot.on_event("ready")
 async def on_ready(_):
+    global INITIAL_SYNC_COMPLETE
     print("Bot is ready!")
+    print(f"Bot startup time: {BOT_STARTUP_TIME}")
+    print(f"Current time: {datetime.now(timezone.utc)}")
+    print(f"Ignoring messages from before: {BOT_STARTUP_TIME}")
+    
+    # Mark that initial sync is complete
+    INITIAL_SYNC_COMPLETE = True
+    print("Initial sync complete - will now process new messages normally")
+    
     # Start the periodic spontaneous message checker
     asyncio.create_task(autonomous_chat.periodic_spontaneous_check(bot))
 
@@ -99,8 +131,34 @@ async def on_message(room, message):
     # Skip processing for stale messages
     message_time = datetime.fromtimestamp(getattr(message, 'server_timestamp', 0) / 1000, timezone.utc)
     now = datetime.now(timezone.utc)
-    if (now - message_time).total_seconds() > 3600:
-        print("Message is stale; ignoring.")
+    
+    # Enhanced stale message detection
+    # 1. Ignore messages from before the bot started
+    # 2. During initial sync, be more aggressive about filtering old messages
+    # 3. Ignore messages older than 1 hour as a fallback
+    # 4. Handle cases where server_timestamp might be missing or invalid
+    
+    if not getattr(message, 'server_timestamp', None):
+        print("Message has no server timestamp; treating as potentially stale.")
+        return
+    
+    # Check if message is from before bot startup
+    if message_time < BOT_STARTUP_TIME:
+        print(f"Message is from before bot startup ({message_time} < {BOT_STARTUP_TIME}); ignoring as stale.")
+        return
+    
+    # During initial sync, be more conservative about processing messages
+    if not INITIAL_SYNC_COMPLETE:
+        # During initial sync, only process very recent messages (last 5 minutes)
+        if (now - message_time).total_seconds() > 300:  # 5 minutes
+            print(f"During initial sync, ignoring message older than 5 minutes ({(now - message_time).total_seconds():.0f}s old)")
+            return
+        else:
+            print(f"During initial sync, processing recent message ({(now - message_time).total_seconds():.0f}s old)")
+    
+    # General fallback: ignore messages older than 1 hour
+    if (now - message_time).total_seconds() > 3600:  # 1 hour fallback
+        print(f"Message is older than 1 hour ({(now - message_time).total_seconds():.0f}s); ignoring as stale.")
         return
     
     # Skip processing bot's own messages for autonomous chat
@@ -199,4 +257,44 @@ async def on_room_member(room, event):
         timestamp
     )
 
-bot.run(access_token=bot_config.ACCESS_TOKEN)
+async def arxiv_maintenance_task():
+    """Background task for arXiv auto-poster maintenance."""
+    logger.info("Starting arXiv maintenance task...")
+    
+    while True:
+        try:
+            await arxiv_auto_poster.run_maintenance_cycle()
+        except Exception as e:
+            logger.error(f"Error in arXiv maintenance cycle: {e}")
+        
+        # Wait 30 minutes before next check
+        await asyncio.sleep(30 * 60)
+
+async def main():
+    """Main bot function."""
+    try:
+        # Login
+        logger.info("Logging in...")
+        await bot.login(bot_config.ACCESS_TOKEN)
+        
+        # Start background tasks
+        logger.info("Starting background tasks...")
+        arxiv_task = asyncio.create_task(arxiv_maintenance_task())
+        
+        # Start the bot
+        logger.info("Starting bot...")
+        await bot.sync_forever()
+        
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+        raise
+    finally:
+        # Clean up
+        if 'arxiv_task' in locals():
+            arxiv_task.cancel()
+        await bot.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
