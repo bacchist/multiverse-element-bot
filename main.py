@@ -95,13 +95,20 @@ async def on_ready(_):
 
 @bot.on_event("command")
 async def on_command(ctx):
-    print("User {} ran command {}".format(ctx.message.sender, ctx.message.command.name))
+    # Get command name from context instead of message
+    command_name = getattr(ctx, 'command', None)
+    if command_name:
+        command_name = getattr(command_name, 'name', 'unknown')
+    else:
+        command_name = 'unknown'
+    
+    print("User {} ran command {}".format(ctx.message.sender, command_name))
     # Log bot commands
     room_name = getattr(ctx.room, 'display_name', None) or getattr(ctx.room, 'name', None)
     chat_logger.log_bot_action(
         ctx.room.room_id, 
         room_name, 
-        f"Command executed: !{ctx.message.command.name} by {ctx.message.sender}"
+        f"Command executed: !{command_name} by {ctx.message.sender}"
     )
 
 @bot.on_event("command_error")
