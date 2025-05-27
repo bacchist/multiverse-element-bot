@@ -1,0 +1,41 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Object-Oriented Programming (OOP) Best Practices
+
+## Use OOP Features for Readability and Maintainability
+- Leverage classes and objects to encapsulate related data and behavior.
+- Use inheritance to share common logic, but prefer composition for flexibility and to avoid deep inheritance hierarchies.
+- Apply polymorphism to write code that works with objects of different types through a common interface.
+- Use access control (public, protected, private) to clearly signal intended usage and encapsulate implementation details.
+- Group related functionality into cohesive classes and modules.
+
+## Principles
+- Follow SOLID principles for OOP design (see [best-practices.mdc](mdc:best-practices.mdc)).
+- Design classes with a single responsibility and clear, descriptive names.
+- Favor interfaces or abstract base classes to define contracts for subclasses.
+- Use properties and methods to control access to internal state, rather than exposing attributes directly.
+
+## Readability
+- Document classes and methods with docstrings explaining their purpose and usage.
+- Use meaningful method and attribute names that reflect their role in the class.
+- Keep class and method sizes small; refactor large classes into smaller, focused ones.
+
+## Example
+```python
+class User:
+    """Represents a user in the system."""
+    def __init__(self, username, email):
+        self.username = username
+        self.email = email
+
+    def send_email(self, subject, message):
+        """Send an email to the user."""
+        # ... implementation ...
+```
+
+---
+
+For more on general best practices, see [best-practices.mdc](mdc:best-practices.mdc).

@@ -1,0 +1,38 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Codebase Best Practices and Principles
+
+## General Principles
+- **DRY (Don't Repeat Yourself):** Avoid code duplication by abstracting repeated logic into functions, classes, or modules.
+- **SOLID Principles:**
+  - **S**ingle Responsibility: Each module/class/function should have one responsibility.
+  - **O**pen/Closed: Code should be open for extension but closed for modification.
+  - **L**iskov Substitution: Subtypes must be substitutable for their base types.
+  - **I**nterface Segregation: Prefer small, specific interfaces over large, general ones.
+  - **D**ependency Inversion: Depend on abstractions, not concretions.
+
+## Design Patterns
+- Use well-known design patterns (e.g., Singleton, Factory, Strategy, Observer) where appropriate to solve common problems and improve code maintainability.
+- Prefer composition over inheritance for code reuse and flexibility.
+
+## Idiomatic Language Usage
+- Write code that follows the idioms and conventions of the language (e.g., PEP8 for Python).
+- Use built-in language features and standard libraries when possible.
+- Prefer clear, expressive naming for variables, functions, and classes.
+
+## Project Structure
+- Organize code into logical modules and packages.
+- Keep the main entry point in [main.py](mdc:main.py).
+- Store configuration in [config.py](mdc:config.py).
+- Add new rules to the `.cursor/rules` directory as `.mdc` files.
+
+## Testing and Documentation
+- Write tests for new features and bug fixes.
+- Document public APIs and complex logic with docstrings and comments.
+
+---
+
+For more details on project structure, see [README.md](mdc:README.md).

@@ -1,0 +1,36 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Readability and Self-Documenting Code
+
+## Human-First Readability
+- Write code that is easy for humans to read and understand.
+- Use clear, descriptive names for variables, functions, and classes to convey intent without needing extra explanation.
+
+## Self-Documenting Code
+- Structure code so that its purpose and logic are apparent from the code itself.
+- Avoid unnecessary complexity; prefer simple, direct solutions.
+
+## Comments
+- Use comments to explain the *purpose* of variables, functions, and complex logic, not just what the code does.
+- Avoid redundant comments that restate obvious code.
+- Place docstrings on all public functions, classes, and modules to describe their intent and usage.
+
+## Example
+```python
+# Good:
+def calculate_total(price, tax_rate):
+    """Calculate the total price including tax."""
+    return price + price * tax_rate
+
+# Bad:
+def ct(p, t):
+    # Adds tax
+    return p + p * t
+```
+
+---
+
+For more on best practices, see [best-practices.mdc](mdc:best-practices.mdc).
