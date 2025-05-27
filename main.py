@@ -76,6 +76,9 @@ async def on_ready(_):
     
     # Start the periodic spontaneous message checker
     asyncio.create_task(autonomous_chat.periodic_spontaneous_check(bot))
+    
+    # Start the arXiv auto-poster background task
+    asyncio.create_task(arxiv_maintenance_task())
 
 @bot.on_event("command")
 async def on_command(ctx):
@@ -277,10 +280,6 @@ async def main():
         logger.info("Logging in...")
         await bot.login(bot_config.ACCESS_TOKEN)
         
-        # Start background tasks
-        logger.info("Starting background tasks...")
-        arxiv_task = asyncio.create_task(arxiv_maintenance_task())
-        
         # Start the bot
         logger.info("Starting bot...")
         await bot.sync_forever()
@@ -291,9 +290,6 @@ async def main():
         logger.error(f"Bot error: {e}")
         raise
     finally:
-        # Clean up
-        if 'arxiv_task' in locals():
-            arxiv_task.cancel()
         await bot.close()
 
 if __name__ == "__main__":
