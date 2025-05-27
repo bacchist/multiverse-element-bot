@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 import niobot
 
 try:
@@ -54,6 +54,7 @@ class ArxivAutoPoster:
         # State tracking
         self.queue: List[ArxivPaper] = []
         self.posted_today: List[str] = []  # arXiv IDs posted today
+        self.posted_papers: Set[str] = set()  # All posted papers (persistent)
         self.last_discovery: Optional[datetime] = None
         self.last_posting: Optional[datetime] = None
         self.posted_total = 0
@@ -91,7 +92,7 @@ class ArxivAutoPoster:
                 if state.get('last_posting'):
                     self.last_posting = datetime.fromisoformat(state['last_posting'])
                 
-                logger.info(f"Loaded auto-poster state: {self.posted_total} total posts, {len(self.posted_today)} today")
+                logger.info(f"Loaded auto-poster state: {self.posted_total} total posts, {len(self.posted_today)} today, {len(self.queue)} papers in queue")
                 
         except Exception as e:
             logger.warning(f"Error loading auto-poster state: {e}")
@@ -99,9 +100,20 @@ class ArxivAutoPoster:
     def save_state(self):
         """Save persistent state to file."""
         try:
+            # Serialize queue
+            queue_data = []
+            for paper in self.queue:
+                try:
+                    queue_data.append(self._serialize_paper(paper))
+                except Exception as e:
+                    logger.warning(f"Error serializing paper for queue: {e}")
+                    continue
+            
             state = {
                 'posted_total': self.posted_total,
                 'posted_today': self.posted_today,
+                'posted_papers': list(self.posted_papers),
+                'queue': queue_data,
                 'last_reset': datetime.now(timezone.utc).date().isoformat(),
                 'last_discovery': self.last_discovery.isoformat() if self.last_discovery else None,
                 'last_posting': self.last_posting.isoformat() if self.last_posting else None
@@ -112,6 +124,24 @@ class ArxivAutoPoster:
                 
         except Exception as e:
             logger.error(f"Error saving auto-poster state: {e}")
+
+    def _serialize_paper(self, paper: ArxivPaper) -> Dict[str, Any]:
+        """Serialize a paper object to JSON-compatible dict."""
+        return {
+            'arxiv_id': paper.arxiv_id,
+            'title': paper.title,
+            'authors': paper.authors,
+            'abstract': paper.abstract,
+            'categories': paper.categories,
+            'published': paper.published.isoformat(),
+            'updated': paper.updated.isoformat(),
+            'pdf_url': paper.pdf_url,
+            'arxiv_url': paper.arxiv_url,
+            'doi': paper.doi,
+            'altmetric_score': paper.altmetric_score,
+            'altmetric_data': paper.altmetric_data,
+            'priority_score': paper.priority_score
+        }
 
     async def run_maintenance_cycle(self):
         """Run a maintenance cycle - discover papers and post if needed."""
@@ -128,7 +158,23 @@ class ArxivAutoPoster:
             )
             
             if should_discover:
-                await self.discover_papers()
+                new_papers = await self.discover_papers()
+                if new_papers:
+                    # Filter out papers we've already posted or queued
+                    existing_ids = {p.arxiv_id for p in self.queue} | set(self.posted_papers)
+                    truly_new = [p for p in new_papers if p.arxiv_id not in existing_ids]
+                    
+                    # Add to queue (sorted by priority)
+                    self.queue.extend(truly_new)
+                    self.queue.sort(key=lambda p: p.priority_score, reverse=True)
+                    
+                    # Keep queue manageable
+                    self.queue = self.queue[:50]
+                    
+                    self.last_discovery = now
+                    self.save_state()
+                    
+                    logger.info(f"Discovery complete: {len(truly_new)} new papers added, queue now has {len(self.queue)} papers")
             
             # Check if we should post a paper
             should_post = (
@@ -143,50 +189,119 @@ class ArxivAutoPoster:
         except Exception as e:
             logger.error(f"Error in auto-poster maintenance cycle: {e}")
 
-    async def discover_papers(self, days_back: int = 3) -> int:
-        """
-        Discover new trending papers and add them to the queue.
-        
-        Args:
-            days_back: Number of days to look back for papers
-            
-        Returns:
-            Number of new papers added to queue
-        """
-        if not self.enabled:
-            return 0
-            
+    async def discover_papers(self) -> List['ArxivPaper']:
+        """Discover new trending papers."""
         try:
-            logger.info(f"Discovering new papers from last {days_back} days...")
+            logger.info("🔍 Discovering new trending papers...")
+            
+            if ArxivAltmetricTracker is None:
+                logger.error("ArxivAltmetricTracker not available")
+                return []
             
             async with ArxivAltmetricTracker() as tracker:
-                # Fetch trending papers
                 papers = await tracker.get_trending_papers(
-                    days_back=days_back,
-                    count=20,  # Get more papers to have good selection
+                    days_back=3,
+                    count=20,  # Get more papers to filter from
                     include_altmetric=True
                 )
             
-            # Filter out papers we've already posted or queued
-            existing_ids = {p.arxiv_id for p in self.queue} | set(self.posted_today)
-            new_papers = [p for p in papers if p.arxiv_id not in existing_ids]
+            if not papers:
+                logger.warning("No papers found during discovery")
+                return []
             
-            # Add to queue (sorted by priority)
-            self.queue.extend(new_papers)
-            self.queue.sort(key=lambda p: p.priority_score, reverse=True)
+            # Log Altmetric statistics for monitoring
+            papers_with_altmetric = [p for p in papers if p.altmetric_score and p.altmetric_score > 0]
+            if papers_with_altmetric:
+                avg_score = sum(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score) / len(papers_with_altmetric)
+                max_score = max(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score)
+                logger.info(f"📊 Altmetric coverage: {len(papers_with_altmetric)}/{len(papers)} papers ({len(papers_with_altmetric)/len(papers)*100:.1f}%)")
+                logger.info(f"📊 Altmetric scores - Avg: {avg_score:.1f}, Max: {max_score:.1f}")
+            else:
+                logger.warning("⚠️ No papers found with Altmetric data")
             
-            # Keep queue manageable
-            self.queue = self.queue[:50]
+            # Filter out already posted papers
+            new_papers = [p for p in papers if p.arxiv_id not in self.posted_papers]
             
-            self.last_discovery = datetime.now(timezone.utc)
-            self.save_state()
+            if len(new_papers) < len(papers):
+                logger.info(f"📝 Filtered out {len(papers) - len(new_papers)} already posted papers")
             
-            logger.info(f"Discovery complete: {len(new_papers)} new papers added, queue now has {len(self.queue)} papers")
-            return len(new_papers)
+            # Apply trending criteria - only keep papers that meet trending thresholds
+            trending_papers = self._filter_trending_papers(new_papers)
+            
+            if len(trending_papers) < len(new_papers):
+                logger.info(f"🔥 Filtered to {len(trending_papers)} truly trending papers (from {len(new_papers)} candidates)")
+            
+            # Log top papers for monitoring
+            if trending_papers:
+                logger.info(f"🏆 Top trending paper: '{trending_papers[0].title[:60]}...' (Priority: {trending_papers[0].priority_score:.1f}, Altmetric: {trending_papers[0].altmetric_score or 0:.1f})")
+            
+            return trending_papers
             
         except Exception as e:
             logger.error(f"Error discovering papers: {e}")
-            return 0
+            return []
+
+    def _filter_trending_papers(self, papers: List['ArxivPaper']) -> List['ArxivPaper']:
+        """Filter papers to only include those that meet trending criteria."""
+        trending_papers = []
+        
+        for paper in papers:
+            is_trending = False
+            reasons = []
+            
+            # Criterion 1: High Altmetric score (strong social engagement)
+            if paper.altmetric_score and paper.altmetric_score >= 5.0:
+                is_trending = True
+                reasons.append(f"High Altmetric score ({paper.altmetric_score:.1f})")
+            
+            # Criterion 2: Medium Altmetric score with social media engagement
+            elif paper.altmetric_score and paper.altmetric_score >= 2.0 and paper.altmetric_data:
+                # Check for actual social engagement
+                tweets = paper.altmetric_data.get('cited_by_tweeters_count', 0)
+                reddit = paper.altmetric_data.get('cited_by_rdts_count', 0)
+                news = paper.altmetric_data.get('cited_by_feeds_count', 0)
+                
+                if tweets >= 3 or reddit >= 1 or news >= 1:
+                    is_trending = True
+                    engagement = []
+                    if tweets >= 3: engagement.append(f"{tweets} tweets")
+                    if reddit >= 1: engagement.append(f"{reddit} Reddit")
+                    if news >= 1: engagement.append(f"{news} news")
+                    reasons.append(f"Social engagement: {', '.join(engagement)}")
+            
+            # Criterion 3: Very high priority score (even without Altmetric)
+            # This catches very recent papers in hot AI categories
+            elif paper.priority_score >= 80.0:
+                is_trending = True
+                reasons.append(f"High priority score ({paper.priority_score:.1f})")
+                
+                # Check if it's a very recent paper in a hot category
+                from datetime import datetime, timezone
+                hours_old = (datetime.now(timezone.utc) - paper.published).total_seconds() / 3600
+                if hours_old < 12:
+                    hot_categories = ['cs.AI', 'cs.LG', 'cs.CL', 'cs.CV']
+                    if any(cat in paper.categories for cat in hot_categories):
+                        reasons.append(f"Recent paper ({hours_old:.1f}h old) in hot category")
+            
+            # Criterion 4: Papers with any Altmetric data in very recent timeframe
+            # (catches breaking papers that just started getting attention)
+            elif paper.altmetric_score and paper.altmetric_score > 0:
+                from datetime import datetime, timezone
+                hours_old = (datetime.now(timezone.utc) - paper.published).total_seconds() / 3600
+                if hours_old < 24:
+                    is_trending = True
+                    reasons.append(f"Recent paper with emerging attention (Altmetric: {paper.altmetric_score:.1f})")
+            
+            if is_trending:
+                trending_papers.append(paper)
+                logger.debug(f"✅ Trending: {paper.title[:50]}... - {'; '.join(reasons)}")
+            else:
+                logger.debug(f"❌ Not trending: {paper.title[:50]}... (Priority: {paper.priority_score:.1f}, Altmetric: {paper.altmetric_score or 0:.1f})")
+        
+        # Sort by priority score to ensure best papers are posted first
+        trending_papers.sort(key=lambda p: p.priority_score, reverse=True)
+        
+        return trending_papers
 
     async def post_next_paper(self) -> bool:
         """

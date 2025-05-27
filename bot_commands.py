@@ -583,8 +583,8 @@ All settings are automatically saved and persist across bot restarts."""
 
     @niobot.command()
     @niobot.is_owner()
-    async def arxiv_discover(self, ctx: niobot.Context, days: int = 3):
-        """Manually trigger arXiv paper discovery. Owner only."""
+    async def arxiv_discover(self, ctx: niobot.Context):
+        """Manually trigger arXiv paper discovery with trending filtering. Owner only."""
         try:
             auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
             if not auto_poster:
@@ -599,15 +599,51 @@ All settings are automatically saved and persist across bot restarts."""
                 self._log_bot_response(ctx, response)
                 return
             
-            days = max(1, min(days, 30))  # Limit to 1-30 days
-            
-            response = f"🔍 Starting manual discovery for last {days} days..."
+            response = f"🔍 Starting manual discovery with trending filters..."
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
             
-            new_papers = await auto_poster.discover_papers(days_back=days)
+            # Get current queue size before discovery
+            queue_before = len(auto_poster.queue)
             
-            response = f"✅ Discovery complete! Found {new_papers} new papers. Queue now has {len(auto_poster.queue)} papers."
+            # Run discovery (this now includes trending filtering)
+            new_papers = await auto_poster.discover_papers()
+            
+            if new_papers:
+                # Filter out papers we've already posted or queued
+                existing_ids = {p.arxiv_id for p in auto_poster.queue} | set(auto_poster.posted_papers)
+                truly_new = [p for p in new_papers if p.arxiv_id not in existing_ids]
+                
+                # Add to queue (sorted by priority)
+                auto_poster.queue.extend(truly_new)
+                auto_poster.queue.sort(key=lambda p: p.priority_score, reverse=True)
+                
+                # Keep queue manageable
+                auto_poster.queue = auto_poster.queue[:50]
+                
+                # Update discovery time and save state
+                from datetime import datetime, timezone
+                auto_poster.last_discovery = datetime.now(timezone.utc)
+                auto_poster.save_state()
+                
+                queue_after = len(auto_poster.queue)
+                added_count = len(truly_new)
+                
+                response = f"""✅ **Discovery Complete!**
+
+📊 **Results:**
+• Found {len(new_papers)} trending papers
+• Added {added_count} new papers to queue
+• Queue: {queue_before} → {queue_after} papers
+
+🔥 **Trending Filters Applied:**
+• Only papers meeting trending criteria were queued
+• Use `!arxiv_criteria` to see filtering rules
+• Use `!arxiv_queue` to see top queued papers"""
+                
+            else:
+                response = "📭 No trending papers found that meet the criteria"
+            
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
             
@@ -770,5 +806,159 @@ Use `!arxiv_config <setting> <value>` to change settings."""
             
         except Exception as e:
             response = f"❌ Error configuring auto-poster: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_trending(self, ctx: niobot.Context, days: int = 3):
+        """Analyze trending papers with detailed Altmetric statistics. Owner only."""
+        try:
+            # Import the tracker (lazy import to avoid startup issues)
+            try:
+                from arxiv_tracker import ArxivAltmetricTracker
+            except ImportError:
+                response = "❌ ArXiv tracker not available. Missing dependencies or module not installed."
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            days = max(1, min(days, 14))  # Limit to 1-14 days
+            
+            response = f"🔍 Analyzing trending papers from the last {days} days with Altmetric data..."
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+            # Initialize tracker and fetch papers
+            async with ArxivAltmetricTracker() as tracker:
+                papers = await tracker.get_trending_papers(
+                    days_back=days,
+                    count=20,  # Get more papers for analysis
+                    include_altmetric=True
+                )
+            
+            if not papers:
+                response = "❌ No AI papers found in the specified time range."
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            # Analyze Altmetric coverage and scores
+            papers_with_altmetric = [p for p in papers if p.altmetric_score and p.altmetric_score > 0]
+            papers_without_altmetric = [p for p in papers if not p.altmetric_score or p.altmetric_score == 0]
+            
+            if papers_with_altmetric:
+                avg_altmetric = sum(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score) / len(papers_with_altmetric)
+                max_altmetric = max(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score)
+                top_altmetric_paper = max(papers_with_altmetric, key=lambda p: p.altmetric_score or 0)
+            else:
+                avg_altmetric = 0
+                max_altmetric = 0
+                top_altmetric_paper = None
+            
+            # Generate analysis report
+            analysis = f"""📊 **Trending Papers Analysis** (Last {days} days)
+
+**Coverage:**
+- Total papers found: {len(papers)}
+- Papers with Altmetric data: {len(papers_with_altmetric)} ({len(papers_with_altmetric)/len(papers)*100:.1f}%)
+- Papers without Altmetric: {len(papers_without_altmetric)} ({len(papers_without_altmetric)/len(papers)*100:.1f}%)
+
+**Altmetric Statistics:**
+- Average score: {avg_altmetric:.1f}
+- Highest score: {max_altmetric:.1f}
+- Score range: {min(p.altmetric_score or 0 for p in papers):.1f} - {max_altmetric:.1f}"""
+
+            if top_altmetric_paper:
+                analysis += f"""
+
+**🏆 Most Trending Paper:**
+**{top_altmetric_paper.title[:80]}{'...' if len(top_altmetric_paper.title) > 80 else ''}**
+- Altmetric Score: {top_altmetric_paper.altmetric_score:.1f}
+- Priority Score: {top_altmetric_paper.priority_score:.1f}
+- Authors: {', '.join(top_altmetric_paper.authors[:2])}{'...' if len(top_altmetric_paper.authors) > 2 else ''}
+- 🔗 {top_altmetric_paper.arxiv_url}"""
+
+                # Add detailed Altmetric breakdown if available
+                if top_altmetric_paper.altmetric_data:
+                    data = top_altmetric_paper.altmetric_data
+                    mentions = []
+                    if data.get('cited_by_tweeters_count', 0) > 0:
+                        mentions.append(f"🐦 {data['cited_by_tweeters_count']} tweets")
+                    if data.get('cited_by_posts_count', 0) > 0:
+                        mentions.append(f"📱 {data['cited_by_posts_count']} posts")
+                    if data.get('cited_by_rdts_count', 0) > 0:
+                        mentions.append(f"🔴 {data['cited_by_rdts_count']} Reddit")
+                    if data.get('cited_by_feeds_count', 0) > 0:
+                        mentions.append(f"📰 {data['cited_by_feeds_count']} news")
+                    
+                    if mentions:
+                        analysis += f"\n- Social mentions: {', '.join(mentions)}"
+
+            # Show top 5 papers by priority score
+            analysis += f"""
+
+**🔥 Top 5 by Priority Score:**"""
+            
+            for i, paper in enumerate(papers[:5], 1):
+                altmetric_str = f"{paper.altmetric_score:.1f}" if paper.altmetric_score else "0"
+                analysis += f"""
+{i}. **{paper.title[:50]}{'...' if len(paper.title) > 50 else ''}**
+   Priority: {paper.priority_score:.1f} | Altmetric: {altmetric_str}"""
+
+            await ctx.respond(analysis)
+            self._log_bot_response(ctx, analysis)
+            
+        except Exception as e:
+            response = f"❌ Error analyzing trending papers: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_criteria(self, ctx: niobot.Context):
+        """Show the trending criteria used for filtering papers. Owner only."""
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            criteria = """🔥 **Trending Paper Criteria**
+
+Papers must meet **at least one** of these criteria to be queued for posting:
+
+**🏆 Tier 1 - High Impact:**
+• Altmetric score ≥ 5.0 (strong social engagement)
+
+**📱 Tier 2 - Social Engagement:**
+• Altmetric score ≥ 2.0 AND has social activity:
+  - 3+ tweets, OR
+  - 1+ Reddit mentions, OR  
+  - 1+ news coverage
+
+**⚡ Tier 3 - Hot & Recent:**
+• Priority score ≥ 80.0 (very recent papers in hot AI categories)
+• Papers <12 hours old in cs.AI, cs.LG, cs.CL, cs.CV
+
+**🌟 Tier 4 - Emerging Attention:**
+• Any Altmetric score >0 for papers <24 hours old
+• (Catches breaking papers just getting attention)
+
+**📊 Priority Score Calculation:**
+• Altmetric score × 10-20 (exponential scaling)
+• Recency bonus: 50pts for <24h, 25pts for 24-48h
+• Category bonus: cs.AI(25), cs.LG(20), cs.CL/CV(15)
+• Social engagement: tweets(2pt each), Reddit(5pt), news(10pt)
+
+This ensures only papers with genuine trending signals make it to the posting queue."""
+            
+            await ctx.respond(criteria)
+            self._log_bot_response(ctx, criteria)
+            
+        except Exception as e:
+            response = f"❌ Error showing criteria: {str(e)}"
             await ctx.respond(response)
             self._log_bot_response(ctx, response) 

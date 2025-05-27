@@ -46,22 +46,48 @@ class ArxivPaper:
         """Calculate a priority score for ranking papers."""
         score = 0.0
         
-        # Base score from Altmetric
+        # Base score from Altmetric (heavily weighted for trending papers)
         if self.altmetric_score:
-            score += self.altmetric_score * 10
+            # Use exponential scaling to heavily favor high Altmetric scores
+            if self.altmetric_score >= 10:
+                score += self.altmetric_score * 20  # High impact papers get major boost
+            elif self.altmetric_score >= 5:
+                score += self.altmetric_score * 15  # Medium impact papers
+            else:
+                score += self.altmetric_score * 10  # Low impact papers
         
         # Recency bonus (papers from last 24 hours get bonus)
         now = datetime.now(timezone.utc)
         hours_old = (now - self.published).total_seconds() / 3600
         if hours_old < 24:
             score += 50 * (1 - hours_old / 24)
+        elif hours_old < 48:
+            # Smaller bonus for papers 24-48 hours old
+            score += 25 * (1 - (hours_old - 24) / 24)
         
         # Category bonus for popular AI categories
-        popular_categories = {'cs.AI': 20, 'cs.LG': 15, 'cs.CL': 10, 'cs.CV': 10}
+        popular_categories = {'cs.AI': 25, 'cs.LG': 20, 'cs.CL': 15, 'cs.CV': 15, 'cs.NE': 10}
         for category in self.categories:
             if category in popular_categories:
                 score += popular_categories[category]
                 break
+        
+        # Bonus for papers with social media engagement (from Altmetric data)
+        if self.altmetric_data:
+            # Twitter engagement bonus
+            tweets = self.altmetric_data.get('cited_by_tweeters_count', 0)
+            if tweets > 0:
+                score += min(tweets * 2, 30)  # Cap at 30 points
+            
+            # Reddit engagement bonus
+            reddit = self.altmetric_data.get('cited_by_rdts_count', 0)
+            if reddit > 0:
+                score += min(reddit * 5, 25)  # Cap at 25 points
+            
+            # News coverage bonus
+            news = self.altmetric_data.get('cited_by_feeds_count', 0)
+            if news > 0:
+                score += min(news * 10, 50)  # Cap at 50 points
         
         return score
 

@@ -268,3 +268,33 @@ The bot's conversation style:
 > "The attention mechanism bottleneck you're describing sounds similar to what we see in long-context models. Have you considered using sliding window attention?"
 
 The bot aims to feel like a thoughtful colleague who contributes meaningfully to discussions without being overly helpful or robotic.
+
+## ArXiv Auto-Posting
+
+The bot can automatically discover and post trending AI papers from arXiv to designated channels.
+
+### Trending Paper Filtering
+
+The system uses sophisticated filtering to ensure only truly trending papers are posted:
+
+**🏆 Tier 1 - High Impact:** Papers with Altmetric score ≥ 5.0
+**📱 Tier 2 - Social Engagement:** Papers with Altmetric ≥ 2.0 AND social activity (3+ tweets, 1+ Reddit, or news coverage)  
+**⚡ Tier 3 - Hot & Recent:** Very recent papers (<12h) in hot AI categories with priority score ≥ 80
+**🌟 Tier 4 - Emerging:** Papers <24h old with any Altmetric attention
+
+### Commands
+
+```
+!trending_ai [days] [count]             # Show trending papers with Altmetric data
+!arxiv_status                           # Show auto-poster status and queue info
+!arxiv_discover                         # Manually discover trending papers  
+!arxiv_post                             # Manually post next paper from queue
+!arxiv_queue [count]                    # Show papers in posting queue
+!arxiv_config [setting] [value]         # Configure auto-poster settings
+!arxiv_trending [days]                  # Analyze Altmetric statistics
+!arxiv_criteria                         # Show trending filtering criteria
+```
+
+**Target Channel**: Papers are posted to `#ai-papers:themultiverse.school`
+
+**Automatic Operation**: The bot runs maintenance cycles every 6 hours to discover new papers and posts up to 5 papers per day with 4-hour intervals between posts.
