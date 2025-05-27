@@ -31,9 +31,9 @@ class ArxivAutoPoster:
         self, 
         bot: niobot.NioBot,
         target_channel: str = "#ai-papers:themultiverse.school",
-        max_posts_per_day: int = 5,
+        max_posts_per_day: int = 999,  # Effectively no limit
         posting_interval: timedelta = timedelta(hours=4),
-        discovery_interval: timedelta = timedelta(hours=6)
+        discovery_interval: timedelta = timedelta(hours=4)
     ):
         """
         Initialize the auto-poster.
@@ -52,7 +52,7 @@ class ArxivAutoPoster:
         self.discovery_interval = discovery_interval
         
         # State tracking
-        self.queue: List[ArxivPaper] = []
+        self.queue: List = []
         self.posted_today: List[str] = []  # arXiv IDs posted today
         self.posted_papers: Set[str] = set()  # All posted papers (persistent)
         self.last_discovery: Optional[datetime] = None
@@ -78,6 +78,21 @@ class ArxivAutoPoster:
                 self.posted_total = state.get('posted_total', 0)
                 self.posted_today = state.get('posted_today', [])
                 
+                # Load posted papers set (CRITICAL FIX)
+                posted_papers_list = state.get('posted_papers', [])
+                self.posted_papers = set(posted_papers_list)
+                
+                # Load queue
+                queue_data = state.get('queue', [])
+                self.queue = []
+                for paper_data in queue_data:
+                    try:
+                        paper = self._deserialize_paper(paper_data)
+                        self.queue.append(paper)
+                    except Exception as e:
+                        logger.warning(f"Error deserializing paper from queue: {e}")
+                        continue
+                
                 # Check if we need to reset daily counter
                 last_reset = state.get('last_reset')
                 if last_reset:
@@ -92,7 +107,7 @@ class ArxivAutoPoster:
                 if state.get('last_posting'):
                     self.last_posting = datetime.fromisoformat(state['last_posting'])
                 
-                logger.info(f"Loaded auto-poster state: {self.posted_total} total posts, {len(self.posted_today)} today, {len(self.queue)} papers in queue")
+                logger.info(f"Loaded auto-poster state: {self.posted_total} total posts, {len(self.posted_today)} today, {len(self.posted_papers)} posted papers tracked, {len(self.queue)} papers in queue")
                 
         except Exception as e:
             logger.warning(f"Error loading auto-poster state: {e}")
@@ -125,7 +140,7 @@ class ArxivAutoPoster:
         except Exception as e:
             logger.error(f"Error saving auto-poster state: {e}")
 
-    def _serialize_paper(self, paper: ArxivPaper) -> Dict[str, Any]:
+    def _serialize_paper(self, paper) -> Dict[str, Any]:
         """Serialize a paper object to JSON-compatible dict."""
         return {
             'arxiv_id': paper.arxiv_id,
@@ -142,6 +157,33 @@ class ArxivAutoPoster:
             'altmetric_data': paper.altmetric_data,
             'priority_score': paper.priority_score
         }
+
+    def _deserialize_paper(self, paper_data: Dict[str, Any]):
+        """Deserialize a paper object from JSON-compatible dict."""
+        if ArxivPaper is None:
+            raise ImportError("ArxivPaper not available")
+            
+        from datetime import datetime
+        
+        paper = ArxivPaper(
+            arxiv_id=paper_data['arxiv_id'],
+            title=paper_data['title'],
+            authors=paper_data['authors'],
+            abstract=paper_data['abstract'],
+            categories=paper_data['categories'],
+            published=datetime.fromisoformat(paper_data['published']),
+            updated=datetime.fromisoformat(paper_data['updated']),
+            pdf_url=paper_data['pdf_url'],
+            arxiv_url=paper_data['arxiv_url'],
+            doi=paper_data.get('doi'),
+            altmetric_score=paper_data.get('altmetric_score'),
+            altmetric_data=paper_data.get('altmetric_data'),
+        )
+        
+        # Set priority score directly to avoid recalculation
+        paper.priority_score = paper_data.get('priority_score', 0.0)
+        
+        return paper
 
     async def run_maintenance_cycle(self):
         """Run a maintenance cycle - discover papers and post if needed."""
@@ -164,8 +206,14 @@ class ArxivAutoPoster:
                     existing_ids = {p.arxiv_id for p in self.queue} | set(self.posted_papers)
                     truly_new = [p for p in new_papers if p.arxiv_id not in existing_ids]
                     
-                    # Add to queue (sorted by priority)
+                    # Re-rank existing queue with updated priority scores
+                    for paper in self.queue:
+                        paper.priority_score = paper._calculate_priority()
+                    
+                    # Add new papers to queue
                     self.queue.extend(truly_new)
+                    
+                    # Sort entire queue by updated priority scores
                     self.queue.sort(key=lambda p: p.priority_score, reverse=True)
                     
                     # Keep queue manageable
@@ -174,7 +222,17 @@ class ArxivAutoPoster:
                     self.last_discovery = now
                     self.save_state()
                     
-                    logger.info(f"Discovery complete: {len(truly_new)} new papers added, queue now has {len(self.queue)} papers")
+                    logger.info(f"Discovery complete: {len(truly_new)} new papers added, queue re-ranked, now has {len(self.queue)} papers")
+                else:
+                    # Even if no new papers, re-rank existing queue
+                    if self.queue:
+                        for paper in self.queue:
+                            paper.priority_score = paper._calculate_priority()
+                        self.queue.sort(key=lambda p: p.priority_score, reverse=True)
+                        self.save_state()
+                        logger.info(f"No new papers found, but re-ranked existing queue of {len(self.queue)} papers")
+                    
+                    self.last_discovery = now
             
             # Check if we should post a paper
             should_post = (
@@ -189,7 +247,7 @@ class ArxivAutoPoster:
         except Exception as e:
             logger.error(f"Error in auto-poster maintenance cycle: {e}")
 
-    async def discover_papers(self) -> List['ArxivPaper']:
+    async def discover_papers(self) -> List:
         """Discover new trending papers."""
         try:
             logger.info("🔍 Discovering new trending papers...")
@@ -208,6 +266,13 @@ class ArxivAutoPoster:
             if not papers:
                 logger.warning("No papers found during discovery")
                 return []
+            
+            # Re-rank papers with updated priority scores
+            for paper in papers:
+                paper.priority_score = paper._calculate_priority()
+            
+            # Sort by updated priority scores
+            papers.sort(key=lambda p: p.priority_score, reverse=True)
             
             # Log Altmetric statistics for monitoring
             papers_with_altmetric = [p for p in papers if p.altmetric_score and p.altmetric_score > 0]
@@ -241,7 +306,7 @@ class ArxivAutoPoster:
             logger.error(f"Error discovering papers: {e}")
             return []
 
-    def _filter_trending_papers(self, papers: List['ArxivPaper']) -> List['ArxivPaper']:
+    def _filter_trending_papers(self, papers: List) -> List:
         """Filter papers to only include those that meet trending criteria."""
         trending_papers = []
         
@@ -347,8 +412,9 @@ class ArxivAutoPoster:
             message = self._format_paper_for_posting(paper)
             await self.bot.send_message(self.target_channel, message)
             
-            # Update tracking
+            # Update tracking (CRITICAL FIX: Add to posted_papers set)
             self.posted_today.append(paper.arxiv_id)
+            self.posted_papers.add(paper.arxiv_id)  # Prevent re-posting
             self.posted_total += 1
             self.last_posting = datetime.now(timezone.utc)
             self.save_state()
@@ -360,7 +426,7 @@ class ArxivAutoPoster:
             logger.error(f"Error posting paper: {e}")
             return False
 
-    def _format_paper_for_posting(self, paper: 'ArxivPaper') -> str:
+    def _format_paper_for_posting(self, paper) -> str:
         """Format a paper for posting to Matrix."""
         # Generate insightful comment using BAML
         comment = self._generate_paper_comment(paper)
@@ -391,7 +457,7 @@ class ArxivAutoPoster:
         
         return message
 
-    def _generate_paper_comment(self, paper: 'ArxivPaper') -> str:
+    def _generate_paper_comment(self, paper) -> str:
         """Generate a thoughtful comment about the paper using BAML."""
         try:
             # Try to use BAML for comment generation

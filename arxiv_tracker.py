@@ -46,27 +46,30 @@ class ArxivPaper:
         """Calculate a priority score for ranking papers."""
         score = 0.0
         
-        # Base score from Altmetric (heavily weighted for trending papers)
-        if self.altmetric_score:
-            # Use exponential scaling to heavily favor high Altmetric scores
+        # Base score from Altmetric (heavily weighted using (score + 1)² formula)
+        if self.altmetric_score and self.altmetric_score > 0:
+            # Use (altmetric_score + 1)² for exponential weighting
+            # This heavily favors papers with any Altmetric data
+            altmetric_weight = (self.altmetric_score + 1) ** 2
+            score += altmetric_weight
+            
+            # Additional bonus for very high scores
             if self.altmetric_score >= 10:
-                score += self.altmetric_score * 20  # High impact papers get major boost
+                score += 100  # Extra boost for viral papers
             elif self.altmetric_score >= 5:
-                score += self.altmetric_score * 15  # Medium impact papers
-            else:
-                score += self.altmetric_score * 10  # Low impact papers
+                score += 50   # Boost for highly trending papers
         
-        # Recency bonus (papers from last 24 hours get bonus)
+        # Recency bonus (reduced impact compared to Altmetric)
         now = datetime.now(timezone.utc)
         hours_old = (now - self.published).total_seconds() / 3600
         if hours_old < 24:
-            score += 50 * (1 - hours_old / 24)
+            score += 25 * (1 - hours_old / 24)  # Reduced from 50
         elif hours_old < 48:
             # Smaller bonus for papers 24-48 hours old
-            score += 25 * (1 - (hours_old - 24) / 24)
+            score += 12 * (1 - (hours_old - 24) / 24)  # Reduced from 25
         
-        # Category bonus for popular AI categories
-        popular_categories = {'cs.AI': 25, 'cs.LG': 20, 'cs.CL': 15, 'cs.CV': 15, 'cs.NE': 10}
+        # Category bonus for popular AI categories (reduced impact)
+        popular_categories = {'cs.AI': 15, 'cs.LG': 12, 'cs.CL': 10, 'cs.CV': 10, 'cs.NE': 8}
         for category in self.categories:
             if category in popular_categories:
                 score += popular_categories[category]
@@ -74,20 +77,20 @@ class ArxivPaper:
         
         # Bonus for papers with social media engagement (from Altmetric data)
         if self.altmetric_data:
-            # Twitter engagement bonus
+            # Twitter engagement bonus (reduced caps)
             tweets = self.altmetric_data.get('cited_by_tweeters_count', 0)
             if tweets > 0:
-                score += min(tweets * 2, 30)  # Cap at 30 points
+                score += min(tweets * 1.5, 20)  # Reduced from 2x and cap of 30
             
-            # Reddit engagement bonus
+            # Reddit engagement bonus (reduced caps)
             reddit = self.altmetric_data.get('cited_by_rdts_count', 0)
             if reddit > 0:
-                score += min(reddit * 5, 25)  # Cap at 25 points
+                score += min(reddit * 3, 15)  # Reduced from 5x and cap of 25
             
-            # News coverage bonus
+            # News coverage bonus (reduced caps)
             news = self.altmetric_data.get('cited_by_feeds_count', 0)
             if news > 0:
-                score += min(news * 10, 50)  # Cap at 50 points
+                score += min(news * 6, 30)  # Reduced from 10x and cap of 50
         
         return score
 
