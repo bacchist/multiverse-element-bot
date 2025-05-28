@@ -208,18 +208,28 @@ class AutonomousChat:
         """Extract thread information from a message if it's part of a thread."""
         try:
             # Check if the message has thread relation information
+            # The content might be directly on the message object or in a content attribute
             content = getattr(message, 'content', {})
+            if not content:
+                # Try to get it from the source if content is empty
+                source = getattr(message, 'source', {})
+                content = source.get('content', {})
+            
             relates_to = content.get('m.relates_to', {})
+            
+            print(f"Debug - Message content: {content}")
+            print(f"Debug - Relates to: {relates_to}")
             
             # Check for thread relation
             if relates_to.get('rel_type') == 'm.thread':
+                thread_root = relates_to.get('event_id')
+                print(f"Debug - Found thread! Root event: {thread_root}")
                 return {
-                    'event_id': relates_to.get('event_id'),
+                    'event_id': thread_root,
                     'is_falling_back': relates_to.get('is_falling_back', True)
                 }
             
-            # Check if this message itself could be a thread root
-            # (we might want to start a thread in response to it)
+            print("Debug - No thread relation found")
             return None
             
         except Exception as e:
@@ -229,6 +239,8 @@ class AutonomousChat:
     async def _send_threaded_message(self, bot, room_id: str, message: str, thread_root_id: str) -> bool:
         """Send a message as a threaded reply."""
         try:
+            print(f"Debug - Attempting to send threaded reply to {thread_root_id}")
+            
             # Construct the threaded message content
             content = {
                 "msgtype": "m.text",
@@ -243,14 +255,24 @@ class AutonomousChat:
                 }
             }
             
-            # Send using the underlying Matrix client
-            response = await bot.room_send(
-                room_id=room_id,
-                message_type="m.room.message",
-                content=content
-            )
+            print(f"Debug - Threaded message content: {content}")
             
-            return hasattr(response, 'event_id')
+            # Send using the niobot send_message method with custom content
+            # First try using the underlying Matrix client
+            try:
+                response = await bot.client.room_send(
+                    room_id=room_id,
+                    message_type="m.room.message",
+                    content=content
+                )
+                print(f"Debug - Threaded message response: {response}")
+                return hasattr(response, 'event_id')
+            except Exception as e:
+                print(f"Debug - Failed to send via client.room_send: {e}")
+                # Fallback: try using niobot's send_message but it might not preserve threading
+                await bot.send_message(room_id, message)
+                print("Debug - Sent as fallback regular message")
+                return False
             
         except Exception as e:
             print(f"Error sending threaded message: {e}")

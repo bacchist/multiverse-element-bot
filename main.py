@@ -197,25 +197,35 @@ async def on_message(room, message):
     try:
         autonomous_response = await autonomous_chat.handle_message(room, message)
         if autonomous_response:
+            print(f"Debug - Autonomous response: {autonomous_response}")
             # Handle both old string format and new dict format for backward compatibility
             if isinstance(autonomous_response, str):
                 # Old format - just send as regular message
+                print("Debug - Sending as regular message (old format)")
                 await bot.send_message(room.room_id, autonomous_response)
             elif isinstance(autonomous_response, dict):
                 # New format - check for threading
                 response_text = autonomous_response.get('text')
                 thread_info = autonomous_response.get('thread_info')
                 
+                print(f"Debug - Response text: {response_text}")
+                print(f"Debug - Thread info: {thread_info}")
+                
                 if response_text:
                     if thread_info and thread_info.get('event_id'):
+                        print(f"Debug - Attempting threaded reply to {thread_info['event_id']}")
                         # Send as threaded reply
                         success = await autonomous_chat._send_threaded_message(
                             bot, room.room_id, response_text, thread_info['event_id']
                         )
                         if not success:
+                            print("Debug - Threading failed, sending as regular message")
                             # Fallback to regular message if threading fails
                             await bot.send_message(room.room_id, response_text)
+                        else:
+                            print("Debug - Threaded message sent successfully")
                     else:
+                        print("Debug - No thread info, sending as regular message")
                         # Send as regular message
                         await bot.send_message(room.room_id, response_text)
     except Exception as e:
