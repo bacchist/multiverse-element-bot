@@ -149,42 +149,6 @@ class AutonomousChat:
         time_since_check = datetime.now(timezone.utc) - self.last_spontaneous_check[room_id]
         return time_since_check >= self.spontaneous_check_interval
     
-    def _has_vague_references(self, content: str) -> bool:
-        """Check if a message contains vague references that might lack context."""
-        vague_words = ['this', 'that', 'it', 'these', 'those', 'here', 'there']
-        words = content.lower().split()
-        
-        # Look for vague references at the start of sentences or after certain words
-        for i, word in enumerate(words):
-            if word in vague_words:
-                # Check if it's at the start or after words that suggest pointing to something
-                if i == 0 or words[i-1] in ['is', 'was', 'looks', 'seems', 'sounds']:
-                    return True
-        return False
-    
-    def _is_seeking_attention(self, room_id: str, sender: str) -> bool:
-        """Check if someone has been trying to get the bot's attention in recent messages."""
-        if room_id not in self.conversation_history:
-            return False
-        
-        recent_messages = self.conversation_history[room_id][-5:]  # Look at last 5 messages
-        sender_messages = [msg for msg in recent_messages if msg["sender"] == sender and not msg["is_bot_message"]]
-        
-        if len(sender_messages) < 2:
-            return False
-        
-        # Look for patterns that suggest trying to get attention
-        attention_indicators = ['bot', 'you', 'hello', 'hey', 'respond', 'answer', 'talk', 'funny', 'clown']
-        bot_mentions = 0
-        
-        for msg in sender_messages:
-            content_lower = msg["content"].lower()
-            if any(indicator in content_lower for indicator in attention_indicators):
-                bot_mentions += 1
-        
-        # If multiple recent messages contain attention indicators, they're probably trying to engage
-        return bot_mentions >= 2
-    
     def _get_conversation_context(self, room_id: str, room_name: Optional[str] = None) -> ConversationContext:
         """Build conversation context for BAML functions."""
         recent_messages = self.conversation_history.get(room_id, [])
@@ -208,7 +172,7 @@ class AutonomousChat:
     async def should_respond_to_message(self, room_id: str, room_name: Optional[str], 
                                       sender: str, content: str, 
                                       timestamp: Optional[datetime] = None) -> bool:
-        """Determine if the bot should respond to a message using simple heuristics."""
+        """Determine if the bot should respond to a message. Default to responding."""
         # Check if autonomous chat is enabled in this room
         if not self.is_enabled_in_room(room_id):
             return False
@@ -217,50 +181,8 @@ class AutonomousChat:
         if not self._can_respond_now(room_id):
             return False
         
-        # Simple heuristics for response decision
-        seeking_attention = self._is_seeking_attention(room_id, sender)
-        has_vague_refs = self._has_vague_references(content)
-        
-        try:
-            from baml_client.sync_client import b
-            
-            # Get conversation context
-            context = self._get_conversation_context(room_id, room_name)
-            
-            # Create the new message
-            new_message = Message(
-                sender=sender,
-                content=content,
-                timestamp=timestamp.strftime("%H:%M") if timestamp else datetime.now().strftime("%H:%M"),
-                is_bot_message=False
-            )
-            
-            # Simple decision logic based on heuristics
-            # Respond if:
-            # 1. Someone is seeking attention (multiple attempts to engage)
-            # 2. Message doesn't have vague references we can't understand
-            # 3. Random chance for natural conversation flow
-            
-            if seeking_attention:
-                print(f"Responding: Sender appears to be seeking attention")
-                return True
-            elif has_vague_refs:
-                print(f"Not responding: Message contains vague references")
-                return False
-            else:
-                # Random chance to respond for natural conversation flow
-                # Higher chance for shorter, more direct messages
-                response_chance = 0.3  # 30% base chance
-                if len(content) < 50:  # Short messages get higher chance
-                    response_chance = 0.5
-                
-                should_respond = random.random() < response_chance
-                print(f"Random response decision: {should_respond} (chance: {response_chance:.1f})")
-                return should_respond
-            
-        except Exception as e:
-            print(f"Error in should_respond_to_message: {e}")
-            return False
+        # Default to responding
+        return True
     
     def _get_client_registry(self, use_high_temp: bool = False) -> Optional[Dict[str, Any]]:
         """Create a client registry for BAML functions, optionally with high temperature."""
