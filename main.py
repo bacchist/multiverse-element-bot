@@ -8,6 +8,7 @@ from bot_commands import BotCommands
 from crawling import set_crawler
 from chat_logger import ChatLogger
 from autonomous_chat import AutonomousChat
+from hydration_reminder import HydrationReminderHandler
 from datetime import datetime, timezone, timedelta
 import asyncio
 
@@ -45,9 +46,13 @@ logging.getLogger('__main__').setLevel(logging.DEBUG)
 logging.getLogger('autonomous_chat').setLevel(logging.DEBUG)
 logging.getLogger('bot_commands').setLevel(logging.DEBUG)
 logging.getLogger('arxiv_auto_poster').setLevel(logging.DEBUG)
+logging.getLogger('hydration_reminder').setLevel(logging.DEBUG)
 
 # Initialize chat logger
 chat_logger = ChatLogger()
+
+# Initialize hydration reminder handler
+hydration_handler = HydrationReminderHandler()
 
 # Store bot startup time to ignore messages from before the bot started
 BOT_STARTUP_TIME = datetime.now(timezone.utc)
@@ -229,6 +234,28 @@ async def on_message(room, message):
     if sender == bot_config.USER_ID:
         logging.debug(f"FILTERED: Skipping bot's own message")
         return
+    
+    # Check for hydration reminder message BEFORE other processing
+    try:
+        if hydration_handler.should_handle_message(room.room_id, sender, body):
+            logging.info(f"Hydration reminder detected from {sender} in {room.room_id}")
+            success = await hydration_handler.handle_hydration_reminder(bot, room.room_id)
+            if success:
+                logging.info("Successfully handled hydration reminder")
+                # Log the hydration reminder handling
+                chat_logger.log_bot_action(
+                    room.room_id,
+                    room_name,
+                    f"Responded to hydration reminder #{hydration_handler.current_count}"
+                )
+            else:
+                logging.error("Failed to handle hydration reminder")
+            # Return early - we don't want autonomous chat to also respond to reminder messages
+            return
+    except Exception as e:
+        logging.error(f"Error checking/handling hydration reminder: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Skip autonomous chat for command messages (messages starting with command prefix)
     if body.startswith(bot.command_prefix):

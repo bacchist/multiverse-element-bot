@@ -972,4 +972,89 @@ This ensures the queue always has papers while prioritizing those with genuine t
         except Exception as e:
             response = f"❌ Error showing criteria: {str(e)}"
             await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def hydration_status(self, ctx: niobot.Context):
+        """Check the current hydration reminder counter. Owner only."""
+        try:
+            # Get the hydration handler from the main module
+            import main
+            hydration_handler = getattr(main, 'hydration_handler', None)
+            
+            if not hydration_handler:
+                response = "❌ Hydration reminder handler not available"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            count = hydration_handler.current_count
+            
+            # Determine the bot's current state based on count
+            if count == 0:
+                state = "😊 Fresh and optimistic"
+            elif count < 10:
+                state = "😌 Appreciative and upbeat"
+            elif count < 20:
+                state = "😐 Getting a bit tired"
+            elif count < 30:
+                state = "😒 Doubt setting in"
+            elif count < 50:
+                state = "😠 Irritated and hostile"
+            elif count < 70:
+                state = "😡 Very hostile, feeling targeted"
+            elif count < 90:
+                state = "🤯 Unhinged, fragmenting"
+            else:
+                state = "💀 Terminal madness"
+            
+            response = f"""💧 **Hydration Reminder Status**
+
+Current count: **{count}**
+Bot state: {state}
+
+Target: `@reminder:themultiverse.school` in `#neurospicy:themultiverse.school`
+Watching for: `@room Don't forget to drink water!`
+
+The bot's responses become increasingly unhinged as the counter grows."""
+            
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error checking hydration status: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def hydration_reset(self, ctx: niobot.Context):
+        """Reset the hydration reminder counter to 0. Owner only."""
+        try:
+            # Get the hydration handler from the main module
+            import main
+            hydration_handler = getattr(main, 'hydration_handler', None)
+            
+            if not hydration_handler:
+                response = "❌ Hydration reminder handler not available"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            previous_count = hydration_handler.reset_counter()
+            
+            response = f"""💧 **Hydration Counter Reset**
+
+Previous count: **{previous_count}**
+New count: **0**
+
+The bot has been restored to its fresh, optimistic state! 😊"""
+            
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error resetting hydration counter: {str(e)}"
+            await ctx.respond(response)
             self._log_bot_response(ctx, response) 
