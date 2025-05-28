@@ -2,6 +2,7 @@ import asyncio
 import random
 import json
 import os
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -9,6 +10,9 @@ from baml_client.sync_client import b
 from baml_client.types import Message, ConversationContext
 from baml_py import ClientRegistry
 from chat_logger import ChatLogger
+
+# Set up logger for this module
+logger = logging.getLogger(__name__)
 
 class AutonomousChat:
     """Handles autonomous conversation capabilities for the bot."""
@@ -52,10 +56,10 @@ class AutonomousChat:
                 if 'quirk_chance' in settings:
                     self.quirk_chance = settings['quirk_chance']
                 
-                print(f"Loaded autonomous chat settings: {len(self.enabled_rooms)} room settings")
+                logger.info(f"Loaded autonomous chat settings: {len(self.enabled_rooms)} room settings")
                 
         except Exception as e:
-            print(f"Warning: Error loading autonomous chat settings: {e}")
+            logger.warning(f"Warning: Error loading autonomous chat settings: {e}")
             # Continue with defaults if loading fails
 
     def save_settings(self):
@@ -74,7 +78,7 @@ class AutonomousChat:
                 json.dump(settings, f, indent=2)
                 
         except Exception as e:
-            print(f"Error saving autonomous chat settings: {e}")
+            logger.error(f"Error saving autonomous chat settings: {e}")
     
     def is_enabled_in_room(self, room_id: str) -> bool:
         """Check if autonomous chat is enabled in a specific room. Default is True."""
@@ -207,47 +211,47 @@ class AutonomousChat:
     def _get_thread_info(self, message) -> Optional[Dict[str, Any]]:
         """Extract thread information from a message if it's part of a thread."""
         try:
-            print(f"Debug - Message object type: {type(message)}")
-            print(f"Debug - Message attributes: {dir(message)}")
+            logger.debug(f"Debug - Message object type: {type(message)}")
+            logger.debug(f"Debug - Message attributes: {dir(message)}")
             
             # Check if the message has thread relation information
             # The content might be directly on the message object or in a content attribute
             content = getattr(message, 'content', {})
-            print(f"Debug - Raw content from getattr: {content}")
+            logger.debug(f"Debug - Raw content from getattr: {content}")
             
             if not content:
                 # Try to get it from the source if content is empty
                 source = getattr(message, 'source', {})
-                print(f"Debug - Source: {source}")
+                logger.debug(f"Debug - Source: {source}")
                 content = source.get('content', {})
-                print(f"Debug - Content from source: {content}")
+                logger.debug(f"Debug - Content from source: {content}")
             
             # Also try accessing it as a property if it exists
             if hasattr(message, 'source') and hasattr(message.source, 'get'):
                 source_content = message.source.get('content', {})
-                print(f"Debug - Source content via property: {source_content}")
+                logger.debug(f"Debug - Source content via property: {source_content}")
                 if source_content and not content:
                     content = source_content
             
             relates_to = content.get('m.relates_to', {})
             
-            print(f"Debug - Final content: {content}")
-            print(f"Debug - Relates to: {relates_to}")
+            logger.debug(f"Debug - Final content: {content}")
+            logger.debug(f"Debug - Relates to: {relates_to}")
             
             # Check for thread relation
             if relates_to.get('rel_type') == 'm.thread':
                 thread_root = relates_to.get('event_id')
-                print(f"Debug - Found thread! Root event: {thread_root}")
+                logger.debug(f"Debug - Found thread! Root event: {thread_root}")
                 return {
                     'event_id': thread_root,
                     'is_falling_back': relates_to.get('is_falling_back', True)
                 }
             
-            print("Debug - No thread relation found")
+            logger.debug("Debug - No thread relation found")
             return None
             
         except Exception as e:
-            print(f"Error extracting thread info: {e}")
+            logger.error(f"Error extracting thread info: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -255,7 +259,7 @@ class AutonomousChat:
     async def _send_threaded_message(self, bot, room_id: str, message: str, thread_root_id: str) -> bool:
         """Send a message as a threaded reply."""
         try:
-            print(f"Debug - Attempting to send threaded reply to {thread_root_id}")
+            logger.debug(f"Debug - Attempting to send threaded reply to {thread_root_id}")
             
             # Construct the threaded message content
             content = {
@@ -271,7 +275,7 @@ class AutonomousChat:
                 }
             }
             
-            print(f"Debug - Threaded message content: {content}")
+            logger.debug(f"Debug - Threaded message content: {content}")
             
             # Send using the underlying Matrix client
             try:
@@ -280,34 +284,34 @@ class AutonomousChat:
                     message_type="m.room.message",
                     content=content
                 )
-                print(f"Debug - Threaded message response: {response}")
-                print(f"Debug - Response type: {type(response)}")
-                print(f"Debug - Response attributes: {dir(response) if hasattr(response, '__dict__') else 'No __dict__'}")
+                logger.debug(f"Debug - Threaded message response: {response}")
+                logger.debug(f"Debug - Response type: {type(response)}")
+                logger.debug(f"Debug - Response attributes: {dir(response) if hasattr(response, '__dict__') else 'No __dict__'}")
                 
                 # Check if the response indicates success
                 if hasattr(response, 'event_id') and response.event_id:
-                    print(f"Debug - Threaded message sent successfully with event_id: {response.event_id}")
+                    logger.debug(f"Debug - Threaded message sent successfully with event_id: {response.event_id}")
                     return True
                 elif hasattr(response, 'transport_response') and hasattr(response.transport_response, 'status_code'):
                     status = response.transport_response.status_code
-                    print(f"Debug - HTTP status: {status}")
+                    logger.debug(f"Debug - HTTP status: {status}")
                     if 200 <= status < 300:
-                        print("Debug - HTTP status indicates success, assuming threaded message sent")
+                        logger.debug("Debug - HTTP status indicates success, assuming threaded message sent")
                         return True
                     else:
-                        print(f"Debug - HTTP status indicates failure: {status}")
+                        logger.debug(f"Debug - HTTP status indicates failure: {status}")
                         return False
                 else:
-                    print(f"Debug - Unexpected response format, assuming failure")
+                    logger.debug(f"Debug - Unexpected response format, assuming failure")
                     return False
                     
             except Exception as e:
-                print(f"Debug - Exception during client.room_send: {e}")
-                print(f"Debug - Exception type: {type(e)}")
+                logger.debug(f"Debug - Exception during client.room_send: {e}")
+                logger.debug(f"Debug - Exception type: {type(e)}")
                 return False
             
         except Exception as e:
-            print(f"Error sending threaded message: {e}")
+            logger.error(f"Error sending threaded message: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -335,7 +339,7 @@ class AutonomousChat:
             # Generate response with or without client registry
             if client_options:
                 response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message, **client_options)
-                print(f"🌶️ Using high temperature (1.0) for spicy response")
+                logger.info(f"🌶️ Using high temperature (1.0) for spicy response")
             else:
                 response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message)
             
@@ -348,14 +352,14 @@ class AutonomousChat:
             # Add the actual message that will be sent to history (not the original)
             self.add_message_to_history(room_id, self.bot_user_id, quirky_message)
             
-            print(f"Generated response: {response.message}")
+            logger.info(f"Generated response: {response.message}")
             if quirky_message != response.message:
-                print(f"Applied quirky behavior: {quirky_message}")
+                logger.info(f"Applied quirky behavior: {quirky_message}")
             
             return quirky_message
             
         except Exception as e:
-            print(f"Error generating response: {e}")
+            logger.error(f"Error generating response: {e}")
             return None
     
     async def check_spontaneous_message(self, room_id: str, room_name: Optional[str]) -> Optional[str]:
@@ -386,7 +390,7 @@ class AutonomousChat:
             # Check if bot wants to say something
             if client_options:
                 spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context, **client_options)
-                print(f"🌶️ Using high temperature (1.0) for spicy spontaneous message")
+                logger.info(f"🌶️ Using high temperature (1.0) for spicy spontaneous message")
             else:
                 spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context)
             
@@ -400,16 +404,16 @@ class AutonomousChat:
                 # Add the actual message that will be sent to history (not the original)
                 self.add_message_to_history(room_id, self.bot_user_id, quirky_message)
                 
-                print(f"Spontaneous message: {spontaneous.message} (reasoning: {spontaneous.reasoning})")
+                logger.info(f"Spontaneous message: {spontaneous.message} (reasoning: {spontaneous.reasoning})")
                 if quirky_message != spontaneous.message:
-                    print(f"Applied quirky behavior: {quirky_message}")
+                    logger.info(f"Applied quirky behavior: {quirky_message}")
                 
                 return quirky_message
             
             return None
             
         except Exception as e:
-            print(f"Error checking spontaneous message: {e}")
+            logger.error(f"Error checking spontaneous message: {e}")
             return None
     
     async def handle_message(self, room, message) -> Optional[Dict[str, Any]]:
@@ -418,7 +422,7 @@ class AutonomousChat:
         content = getattr(message, 'body', '')
         room_name = getattr(room, 'display_name', None) or getattr(room, 'name', None)
         
-        print(f"Debug - handle_message called for sender: {sender}, content: {content[:50]}...")
+        logger.debug(f"Debug - handle_message called for sender: {sender}, content: {content[:50]}...")
         
         # Get timestamp
         server_timestamp = getattr(message, 'server_timestamp', None)
@@ -431,7 +435,7 @@ class AutonomousChat:
             room.room_id, room_name, sender, content, timestamp
         )
         
-        print(f"Debug - should_respond: {should_respond}")
+        logger.debug(f"Debug - should_respond: {should_respond}")
         
         if should_respond:
             # Add realistic delay to simulate human reading/thinking time
@@ -440,20 +444,20 @@ class AutonomousChat:
             message_length_factor = min(len(content) / 100, 3)  # Up to 3 extra seconds for long messages
             total_delay = base_delay + message_length_factor
             
-            print(f"Waiting {total_delay:.1f} seconds before responding...")
+            logger.debug(f"Waiting {total_delay:.1f} seconds before responding...")
             await asyncio.sleep(total_delay)
             
             response_text = await self.generate_response(
                 room.room_id, room_name, sender, content, timestamp
             )
             
-            print(f"Debug - generated response_text: {response_text}")
+            logger.debug(f"Debug - generated response_text: {response_text}")
             
             if response_text:
                 # Check if the original message was in a thread
-                print("Debug - Checking for thread info...")
+                logger.debug("Debug - Checking for thread info...")
                 thread_info = self._get_thread_info(message)
-                print(f"Debug - thread_info result: {thread_info}")
+                logger.debug(f"Debug - thread_info result: {thread_info}")
                 
                 return {
                     'text': response_text,
@@ -464,7 +468,7 @@ class AutonomousChat:
         if sender != self.bot_user_id:
             self.add_message_to_history(room.room_id, sender, content, timestamp)
         
-        print("Debug - handle_message returning None")
+        logger.debug("Debug - handle_message returning None")
         return None
     
     async def periodic_spontaneous_check(self, bot):
@@ -492,7 +496,7 @@ class AutonomousChat:
                             await asyncio.sleep(5)
                 
             except Exception as e:
-                print(f"Error in periodic spontaneous check: {e}")
+                logger.error(f"Error in periodic spontaneous check: {e}")
                 await asyncio.sleep(60)  # Wait a minute before retrying
 
     def _apply_quirky_behavior(self, message: str, room_id: str) -> str:
@@ -565,7 +569,7 @@ class AutonomousChat:
             hint = lore_result.hint
             
         except Exception as e:
-            print(f"Error generating contextual lore hint: {e}")
+            logger.error(f"Error generating contextual lore hint: {e}")
             # Fallback to static hints if BAML fails
             static_hints = [
                 "Containment Level: Inconclusive",
