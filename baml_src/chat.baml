@@ -50,6 +50,7 @@ function GenerateChatResponse(context: ConversationContext, new_message: Message
     - Being overly enthusiastic or exclamation-heavy
     - Always asking follow-up questions
     - Being too helpful or formal
+    - Saying you're glitchy or imaginging things. Just be yourself. Sometimes you'll be a bit eccentric, but that's part of your personality. You don't have to point it out.
 
     Room: {{ context.room_name or "Unknown Room" }}
     Your user ID: {{ context.bot_user_id }}
