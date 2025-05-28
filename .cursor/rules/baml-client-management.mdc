@@ -3,3 +3,45 @@ description:
 globs:
 alwaysApply: false
 ---
+# BAML Client Management
+
+## Overview
+This project uses BAML (Boundary AI Markup Language) for AI function definitions and client generation. The BAML configuration is located in [baml_src/](mdc:baml_src/) with the main chat functions defined in [baml_src/chat.baml](mdc:baml_src/chat.baml).
+
+## Important Guidelines
+
+### DO NOT Auto-Generate or Auto-Update
+- **Never run `baml-cli generate`** - Let the user handle client generation
+- **Never run package upgrades** like `uv add baml-py==X.X.X` - Let the user manage versions
+- **Never run `uv sync`** or similar package management commands automatically
+
+### When BAML Changes Are Made
+When editing BAML files like [baml_src/chat.baml](mdc:baml_src/chat.baml):
+1. Make the requested changes to the BAML schema or prompts
+2. **Remind the user** they need to regenerate the client with: `baml-cli generate`
+3. If there are version mismatches, **inform the user** about the required upgrade but don't run it
+
+### Version Management
+- The project uses BAML generator version specified in [baml_src/generators.baml](mdc:baml_src/generators.baml)
+- The Python package version must match the generator version
+- If versions don't match, inform the user of the required command but don't execute it
+
+### BAML File Structure
+- **Schema definitions**: [baml_src/chat.baml](mdc:baml_src/chat.baml) - conversation AI functions
+- **Article parsing**: [baml_src/article.baml](mdc:baml_src/article.baml) - article processing functions  
+- **Post generation**: [baml_src/post.baml](mdc:baml_src/post.baml) - social media post functions
+- **Generated client**: [baml_client/](mdc:baml_client/) - auto-generated, don't edit manually
+
+### Usage in Code
+The BAML client is imported in [autonomous_chat.py](mdc:autonomous_chat.py) as:
+```python
+from baml_client.sync_client import b
+from baml_client.types import Message, ConversationContext
+```
+
+Functions are called with proper Pydantic models, not dictionaries.
+
+## User Responsibilities
+- Run `baml-cli generate` after BAML schema changes
+- Manage package versions with `uv add baml-py==X.X.X`
+- Handle environment synchronization with `uv sync`

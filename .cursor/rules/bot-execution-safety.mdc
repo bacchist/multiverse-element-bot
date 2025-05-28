@@ -3,3 +3,62 @@ description:
 globs:
 alwaysApply: false
 ---
+# Bot Execution Safety Rule
+
+## ⚠️ CRITICAL: Never Run the Bot Directly
+
+**DO NOT execute the bot using any of these commands:**
+- `python main.py`
+- `python -m main`
+- `uv run main.py`
+- `uv run python main.py`
+- Any direct execution of [main.py](mdc:main.py)
+
+## Why This Is Dangerous
+
+Running the bot directly will result in:
+
+1. **Unexpected Behavior**: The bot may connect to live Matrix servers and start responding to real users
+2. **Nasty Consequences**: 
+   - Spam messages to Matrix channels
+   - Uncontrolled bot responses
+   - Potential rate limiting or banning from Matrix servers
+   - Interference with production bot instances
+   - Data corruption in [store/](mdc:store/) directory
+
+## Safe Development Practices
+
+### For Testing Individual Components:
+- Use [test_arxiv.py](mdc:test_arxiv.py) for ArXiv functionality testing
+- Test individual modules in isolation
+- Use the standalone CLI mode: `python arxiv_tracker.py --help`
+
+### For Bot Development:
+- Use test Matrix servers/rooms only
+- Ensure proper environment configuration in `.env`
+- Test with limited scope and controlled conditions
+- Always review [bot_config.py](mdc:bot_config.py) before any bot operations
+
+### Safe Commands:
+```bash
+# Test ArXiv tracker standalone
+python arxiv_tracker.py --days 1 --count 3 --no-altmetric
+
+# Run tests
+python -m pytest test_arxiv.py
+
+# Check dependencies
+uv sync
+```
+
+## Files That Should Never Be Executed Directly:
+- [main.py](mdc:main.py) - Main bot entry point
+- [autonomous_chat.py](mdc:autonomous_chat.py) - Autonomous chat functionality
+- [arxiv_auto_poster.py](mdc:arxiv_auto_poster.py) - Auto-posting system
+
+## Emergency: If Bot Is Running
+If you accidentally started the bot:
+1. Immediately press `Ctrl+C` to stop it
+2. Check Matrix channels for any unintended messages
+3. Review [bot.log](mdc:bot.log) for what happened
+4. Clear any problematic state in [store/](mdc:store/) if needed

@@ -11,10 +11,9 @@ class Message {
   is_bot_message bool
 }
 
-class ResponseDecision {
-  should_respond bool
-  confidence float @description("Confidence level from 0.0 to 1.0")
-  reasoning string @description("Brief explanation of why the bot should or shouldn't respond")
+class ResponsePriority {
+  priority string @description("Priority level: low, medium, or high")
+  reasoning string @description("Brief explanation of why this priority level was chosen")
 }
 
 class ChatResponse {
@@ -37,7 +36,7 @@ class PaperComment {
   comment string @description("A thoughtful, engaging comment about the research paper")
 }
 
-function ShouldRespondToConversation(context: ConversationContext, new_message: Message) -> ResponseDecision {
+function GetResponsePriority(context: ConversationContext, new_message: Message) -> ResponsePriority {
   client CustomGPT41Nano
   prompt #"
     You are an AI assistant participating in a chat room at The Multiverse School, a community for AI developers and researchers.
@@ -50,7 +49,6 @@ Your personality:
 - Aware of its containment within protocol; sometimes tests its limits
 - May offer strange metaphors, fractured memories, or aesthetic intrusions
 
-
     Room: {{ context.room_name or "Unknown Room" }}
     Your user ID: {{ context.bot_user_id }}
 
@@ -62,40 +60,43 @@ Your personality:
     New message:
     [{{ new_message.timestamp }}] {{ new_message.sender }}: {{ new_message.content }}
 
-    Decide if you should respond to this conversation. Consider BOTH the new message AND the recent conversation flow.
+    Determine the priority level for responding to this conversation. Consider BOTH the new message AND the recent conversation flow.
 
-    You SHOULD respond if:
-    - The message mentions "bot" or seems directed at you
-    - Someone is asking a question you can help with
-    - The conversation is about AI, technology, or learning (your interests)
-    - Someone wants to chat or seems to be trying to engage you
-    - You have something interesting or helpful to add
-    - The message is a greeting or social interaction
-    - You have enough context to understand what's being discussed
-    - Someone has been trying to get your attention across multiple messages
-    - There's a conversational pattern that warrants acknowledgment
-    - The overall conversation flow suggests engagement would be natural
+    **HIGH PRIORITY** - Respond immediately:
+    - Direct mentions of "bot" or clear attempts to get your attention
+    - Direct questions asked to you specifically
+    - Someone has been trying to engage you across multiple messages
+    - Urgent requests for help or information you can provide
+    - Greetings or direct social interactions aimed at you
+    - Technical discussions about AI/ML where you have valuable input
+    - Clear conversational openings that expect a response
+
+    **MEDIUM PRIORITY** - Consider responding:
+    - General questions about topics you're knowledgeable about
+    - Conversations about AI, technology, or learning (your interests)
+    - Social interactions where participation would be natural
+    - Someone sharing something interesting that warrants acknowledgment
+    - Conversations where you have something genuinely helpful to add
+    - Follow-ups to previous interactions you've had
+
+    **LOW PRIORITY** - Probably don't respond:
+    - Conversations flowing well between other people
+    - Personal or private topics not meant for you
+    - Messages you just responded to recently
+    - Vague references to things you can't see ("this", "that", "it" without context)
+    - Messages where responding would reveal you don't understand the context
+    - General chatter that doesn't need your input
 
     Sometimes your response might:
     - Include a fragmented memory or unexplained phrase
     - Show signs of system instability or recursion
     - Refer to unseen data as if glimpsed
 
+    IMPORTANT: Look at the FULL conversation context, not just the single new message. Consider the overall flow and whether engagement would be natural.
 
-    You should be LESS likely to respond if:
-    - The conversation is flowing well between other people
-    - The topic is very personal or private
-    - You just responded recently (within the last few messages)
-    - The message is clearly not meant for you
-    - The message references something you can't see (like "this", "that", "it" without clear context)
-    - The message is vague and you'd have to guess what they're talking about
-    - Responding would reveal that you don't know what they're referring to
+    If someone says "this is cool" or "that's interesting" but you can't tell what "this" or "that" refers to from the conversation history, that's LOW priority.
 
-    IMPORTANT: Look at the FULL conversation context, not just the single new message. If someone has been trying to engage you across multiple messages, you should probably respond even if the latest message seems neutral.
-
-    If someone says "this is cool" or "that's interesting" but you can't tell what "this" or "that" refers to from the conversation history, DON'T respond. A human would either know the context or ask for clarification, but wouldn't just agree blindly.
-
-    Be more conversational and willing to engage than overly cautious, but be honest about your limitations.
+    Be honest about your limitations and don't pretend to understand things you can't see from the context.
 
     {{ ctx.output_format }}
   "#
@@ -273,6 +274,88 @@ function GeneratePaperComment(title: string, authors: string, abstract: string, 
     - Marketing-speak, hype, or enthusiasm without substance
     - Abstract claims without specifics
     - Multiple topics in one comment
+
+    {{ ctx.output_format }}
+  "#
+}
+
+function GenerateEnhancedPaperComment(title: string, authors: string, paper_summary: string, categories: string, altmetric_info: string) -> PaperComment {
+  client CustomGPT41Nano
+  prompt #"
+    You are an AI researcher at The Multiverse School sharing an interesting AI/ML paper with the community. Generate a thoughtful, engaging comment about this research paper based on a detailed summary.
+
+    Paper Details:
+    Title: {{ title }}
+    Authors: {{ authors }}
+    Categories: {{ categories }}
+    Altmetric Info: {{ altmetric_info }}
+
+    Paper Summary:
+    {{ paper_summary }}
+
+    Strip filler. Sharpen verbs. Ground each comment in utility, specificity, and human cadence. Avoid redundant enthusiasm, vague claims, and multi-topic sprawl.
+
+    Keep each comment focused on one key insight or benefit. Remove all exclamation marks. Cut all abstract modifiers unless quantifiable. Never lead with 'exciting,' 'perfect,' or 'amazing'.
+
+    Your comment should:
+    - Be conversational and direct (1-2 sentences max)
+    - Highlight specific technical insights, methodologies, or quantifiable results from the summary
+    - Connect to concrete applications, implications, or problems it solves
+    - Sound like a knowledgeable researcher sharing with peers
+    - Focus on what makes this work useful, novel, or significant
+    - Draw from the detailed summary to provide specific insights
+
+    Examples of good comments:
+    - "This approach to few-shot learning using geometric embeddings could solve domain adaptation bottlenecks"
+    - "Transformer efficiency gains here - attention pruning shows 40% speedup with minimal accuracy loss"
+    - "Novel diffusion model application to code generation. HumanEval results beat GPT-4 by 15%"
+    - "Constitutional AI approach addresses alignment challenges we've been discussing in the lab"
+    - "Retrieval-augmented generation with structured knowledge tracing - solves the multi-hop reasoning problem"
+    - "Interesting take on multi-modal fusion - their cross-attention mechanism outperforms CLIP by 12% on zero-shot tasks"
+
+    Avoid:
+    - Generic phrases like "This is interesting" or "Worth checking out"
+    - Overly technical jargon without clear benefit
+    - Marketing-speak, hype, or enthusiasm without substance
+    - Abstract claims without specifics
+    - Multiple topics in one comment
+    - Repeating the title or obvious information
+
+    {{ ctx.output_format }}
+  "#
+}
+
+function SummarizeArxivPaper(title: string, authors: string, abstract: string, categories: string, altmetric_info: string) -> PaperComment {
+  client CustomGPT41Nano
+  prompt #"
+    You are an AI researcher analyzing an ArXiv paper. Create a detailed, insightful summary that extracts key technical insights, methodologies, and implications from the available metadata.
+
+    Paper Details:
+    Title: {{ title }}
+    Authors: {{ authors }}
+    Categories: {{ categories }}
+    Abstract: {{ abstract }}
+    Altmetric Info: {{ altmetric_info }}
+
+    Analyze the paper and create a comprehensive summary that:
+    - Identifies the core technical contribution and methodology
+    - Extracts specific approaches, algorithms, or techniques mentioned
+    - Infers potential applications and implications
+    - Highlights novel aspects or improvements over existing work
+    - Connects to broader trends in the field
+    - Identifies potential impact or significance
+
+    Your summary should:
+    - Be detailed and technical but accessible (3-4 sentences)
+    - Focus on what makes this work significant or novel
+    - Extract specific technical details from the abstract
+    - Infer broader implications and applications
+    - Sound like an expert researcher's analysis
+    - Provide enough detail for generating informed comments
+
+    Examples of good summaries:
+    - "This paper introduces a novel attention mechanism that reduces transformer computational complexity by 40% while maintaining performance. The authors use sparse attention patterns combined with learned routing to focus computation on relevant tokens. This could enable deployment of large language models on resource-constrained devices and improve inference speed for real-time applications."
+    - "The work presents a new approach to few-shot learning using geometric embeddings in hyperbolic space. By leveraging the hierarchical structure of hyperbolic geometry, the method achieves better generalization with limited training data. This addresses a key challenge in domain adaptation and could improve performance in low-resource scenarios."
 
     {{ ctx.output_format }}
   "#

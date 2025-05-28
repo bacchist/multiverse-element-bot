@@ -59,6 +59,9 @@ class ArxivAutoPoster:
         self.last_posting: Optional[datetime] = None
         self.posted_total = 0
         
+        # Posting coordination (CRITICAL FIX: Prevent double posting)
+        self._posting_lock = asyncio.Lock()
+        
         # Persistence
         self.state_file = Path("arxiv_auto_poster_state.json")
         self.load_state()
@@ -234,15 +237,41 @@ class ArxivAutoPoster:
                     
                     self.last_discovery = now
             
-            # Check if we should post a paper
-            should_post = (
-                len(self.queue) > 0 and
-                len(self.posted_today) < self.max_posts_per_day and
-                (self.last_posting is None or (now - self.last_posting) >= self.posting_interval)
-            )
-            
-            if should_post:
-                await self.post_next_paper()
+            # Check if we should post a paper (with lock to coordinate with manual posts)
+            async with self._posting_lock:
+                should_post = (
+                    len(self.queue) > 0 and
+                    len(self.posted_today) < self.max_posts_per_day and
+                    (self.last_posting is None or (now - self.last_posting) >= self.posting_interval)
+                )
+                
+                if should_post:
+                    # Post directly within the lock (avoid calling post_next_paper to prevent deadlock)
+                    try:
+                        # Get the highest priority paper
+                        paper = self.queue.pop(0)
+                        
+                        # Get the actual room ID for the target channel
+                        target_room_id = self._get_target_room_id()
+                        if not target_room_id:
+                            logger.error(f"Cannot post paper: target room '{self.target_channel}' not found or bot not in room")
+                            return
+                        
+                        # Generate and send the post
+                        message = await self._format_paper_for_posting(paper)
+                        await self.bot.send_message(target_room_id, message)
+                        
+                        # Update tracking
+                        self.posted_today.append(paper.arxiv_id)
+                        self.posted_papers.add(paper.arxiv_id)
+                        self.posted_total += 1
+                        self.last_posting = datetime.now(timezone.utc)
+                        self.save_state()
+                        
+                        logger.info(f"Posted paper (auto): {paper.title[:50]}... (Score: {paper.priority_score:.1f})")
+                        
+                    except Exception as e:
+                        logger.error(f"Error posting paper (auto): {e}")
                 
         except Exception as e:
             logger.error(f"Error in auto-poster maintenance cycle: {e}")
@@ -392,44 +421,52 @@ class ArxivAutoPoster:
 
     async def post_next_paper(self) -> bool:
         """
-        Post the next paper from the queue.
+        Post the next paper from the queue (for manual commands).
         
         Returns:
             True if a paper was posted successfully
         """
-        if not self.enabled or not self.queue:
-            return False
-            
-        if len(self.posted_today) >= self.max_posts_per_day:
-            logger.info("Daily posting limit reached")
-            return False
-            
-        try:
-            # Get the highest priority paper
-            paper = self.queue.pop(0)
-            
-            # Generate and send the post
-            message = self._format_paper_for_posting(paper)
-            await self.bot.send_message(self.target_channel, message)
-            
-            # Update tracking (CRITICAL FIX: Add to posted_papers set)
-            self.posted_today.append(paper.arxiv_id)
-            self.posted_papers.add(paper.arxiv_id)  # Prevent re-posting
-            self.posted_total += 1
-            self.last_posting = datetime.now(timezone.utc)
-            self.save_state()
-            
-            logger.info(f"Posted paper: {paper.title[:50]}... (Score: {paper.priority_score:.1f})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error posting paper: {e}")
-            return False
+        # CRITICAL FIX: Use lock to prevent simultaneous posting
+        async with self._posting_lock:
+            if not self.enabled or not self.queue:
+                return False
+                
+            if len(self.posted_today) >= self.max_posts_per_day:
+                logger.info("Daily posting limit reached")
+                return False
+                
+            try:
+                # Get the highest priority paper
+                paper = self.queue.pop(0)
+                
+                # Get the actual room ID for the target channel
+                target_room_id = self._get_target_room_id()
+                if not target_room_id:
+                    logger.error(f"Cannot post paper: target room '{self.target_channel}' not found or bot not in room")
+                    return False
+                
+                # Generate and send the post
+                message = await self._format_paper_for_posting(paper)
+                await self.bot.send_message(target_room_id, message)
+                
+                # Update tracking
+                self.posted_today.append(paper.arxiv_id)
+                self.posted_papers.add(paper.arxiv_id)  # Prevent re-posting
+                self.posted_total += 1
+                self.last_posting = datetime.now(timezone.utc)
+                self.save_state()
+                
+                logger.info(f"Posted paper (manual): {paper.title[:50]}... (Score: {paper.priority_score:.1f})")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error posting paper (manual): {e}")
+                return False
 
-    def _format_paper_for_posting(self, paper) -> str:
+    async def _format_paper_for_posting(self, paper) -> str:
         """Format a paper for posting to Matrix."""
         # Generate insightful comment using BAML
-        comment = self._generate_paper_comment(paper)
+        comment = await self._generate_paper_comment(paper)
         
         # Add Altmetric context if it's particularly noteworthy
         trending_context = ""
@@ -457,10 +494,10 @@ class ArxivAutoPoster:
         
         return message
 
-    def _generate_paper_comment(self, paper) -> str:
-        """Generate a thoughtful comment about the paper using BAML."""
+    async def _generate_paper_comment(self, paper) -> str:
+        """Generate a thoughtful comment about the paper using BAML with full paper content."""
         try:
-            # Try to use BAML for comment generation
+            # Try to use BAML for comment generation with full paper content
             from baml_client.sync_client import b
             
             # Prepare context for more insightful comments
@@ -476,28 +513,117 @@ class ArxivAutoPoster:
                 if tweets >= 5:
                     trending_info = f"Getting attention on social media ({tweets} tweets). "
             
-            result = b.GeneratePaperComment(
+            logger.info(f"Generating enhanced comment with full paper content for: {paper.title[:50]}...")
+            
+            # Step 1: Try to crawl the full paper content (following prepare_thread_data pattern)
+            try:
+                # Check if we have access to the crawler
+                crawler = getattr(self.bot, 'crawler', None)
+                if crawler:
+                    from crawl4ai import CrawlerRunConfig
+                    
+                    # Try the HTML version first (better for parsing)
+                    html_url = paper.arxiv_url.replace('/abs/', '/html/')
+                    
+                    logger.debug(f"Attempting to crawl ArXiv HTML: {html_url}")
+                    await crawler.start()
+                    result = await crawler.arun(url=html_url, config=CrawlerRunConfig(
+                        exclude_external_images=False,
+                        wait_for_images=True
+                    ))
+                    
+                    if result and hasattr(result, 'markdown') and result.markdown:
+                        logger.debug(f"Successfully crawled paper content ({len(result.markdown)} chars)")
+                        
+                        # Step 2: Parse the paper content (following prepare_thread_data pattern)
+                        parsed_paper = b.ParsePaper(result.markdown)
+                        
+                        # Step 3: Summarize the parsed paper (following prepare_thread_data pattern)
+                        paper_summary = b.WritePaperSummary(parsed_paper)
+                        summary_text = "\n\n".join([p.text for p in paper_summary.summary])
+                        
+                        logger.debug(f"Generated paper summary ({len(summary_text)} chars)")
+                        
+                        # Step 4: Generate comment based on the rich summary
+                        result = b.GenerateEnhancedPaperComment(
+                            title=paper.title,
+                            authors=authors_str,
+                            paper_summary=summary_text,
+                            categories=categories_str,
+                            altmetric_info=trending_info
+                        )
+                        
+                        logger.info(f"Enhanced comment from full content: {result.comment[:100]}...")
+                        return result.comment
+                    else:
+                        logger.debug("No content from HTML crawl, falling back to abstract-based approach")
+                else:
+                    logger.debug("No crawler available, falling back to abstract-based approach")
+                    
+            except Exception as crawl_error:
+                logger.debug(f"Crawling failed ({crawl_error}), falling back to abstract-based approach")
+            
+            # Fallback: Use the enhanced abstract-based approach
+            logger.debug("Using enhanced abstract-based comment generation...")
+            
+            # Step 1: Create a detailed summary from the abstract (following the summarize pattern)
+            summary_result = b.SummarizeArxivPaper(
                 title=paper.title,
                 authors=authors_str,
-                abstract=paper.abstract[:400],  # Slightly longer for better context
+                abstract=paper.abstract,
                 categories=categories_str,
-                altmetric_info=trending_info,
-                context="Generate a concise, insightful comment (1-2 sentences) about why this research is interesting or significant. Focus on the key insight, potential impact, or novel approach rather than just describing what it does."
+                altmetric_info=trending_info
             )
             
+            logger.debug(f"Abstract-based summary: {summary_result.comment[:100]}...")
+            
+            # Step 2: Generate an enhanced comment based on the summary
+            result = b.GenerateEnhancedPaperComment(
+                title=paper.title,
+                authors=authors_str,
+                paper_summary=summary_result.comment,
+                categories=categories_str,
+                altmetric_info=trending_info
+            )
+            
+            logger.info(f"Enhanced comment from abstract: {result.comment[:100]}...")
             return result.comment
             
         except Exception as e:
-            logger.debug(f"Could not generate comment with BAML: {e}")
-            # Fallback to simple comment based on categories
-            if any(cat in ['cs.AI', 'cs.LG'] for cat in paper.categories):
-                return "Interesting new approach in AI/ML research worth checking out."
-            elif 'cs.CL' in paper.categories:
-                return "New developments in natural language processing."
-            elif 'cs.CV' in paper.categories:
-                return "Novel computer vision research with potential applications."
-            else:
-                return "New research that's gaining attention in the AI community."
+            logger.error(f"Enhanced comment generation failed for paper '{paper.title[:50]}...': {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Fallback to the original simple BAML function
+            try:
+                logger.info("Falling back to simple BAML comment generation...")
+                from baml_client.sync_client import b
+                result = b.GeneratePaperComment(
+                    title=paper.title,
+                    authors=authors_str,
+                    abstract=paper.abstract[:400],
+                    categories=categories_str,
+                    altmetric_info=trending_info,
+                    context="Generate a concise, insightful comment (1-2 sentences) about why this research is interesting or significant. Focus on the key insight, potential impact, or novel approach rather than just describing what it does."
+                )
+                logger.info(f"Simple BAML comment generated: {result.comment[:100]}...")
+                return result.comment
+            except Exception as e2:
+                logger.error(f"Simple BAML comment also failed: {e2}")
+                
+                # Final fallback to simple comment based on categories
+                if any(cat in ['cs.AI', 'cs.LG'] for cat in paper.categories):
+                    fallback = "Interesting new approach in AI/ML research worth checking out."
+                elif 'cs.CL' in paper.categories:
+                    fallback = "New developments in natural language processing."
+                elif 'cs.CV' in paper.categories:
+                    fallback = "Novel computer vision research with potential applications."
+                else:
+                    fallback = "New research that's gaining attention in the AI community."
+                
+                logger.info(f"Using fallback comment: {fallback}")
+                return fallback
 
     def get_status(self) -> Dict[str, Any]:
         """Get current status of the auto-poster."""
@@ -523,4 +649,38 @@ class ArxivAutoPoster:
             'last_posting': self.last_posting.strftime('%Y-%m-%d %H:%M UTC') if self.last_posting else None,
             'next_discovery': next_discovery,
             'next_posting': next_posting
-        } 
+        }
+
+    def _get_target_room_id(self) -> Optional[str]:
+        """
+        Get the actual room ID for the target channel.
+        
+        Returns:
+            The room ID if found, None otherwise
+        """
+        # If target_channel is already a room ID, use it directly
+        if self.target_channel.startswith('!'):
+            return self.target_channel
+        
+        # Look for the room by alias in bot.rooms
+        if hasattr(self.bot, 'rooms'):
+            for room_id, room in self.bot.rooms.items():
+                # Check if this room matches our target alias
+                room_aliases = getattr(room, 'canonical_alias', None)
+                alt_aliases = getattr(room, 'alternative_aliases', []) or []
+                
+                # Check canonical alias
+                if room_aliases == self.target_channel:
+                    return room_id
+                
+                # Check alternative aliases
+                if self.target_channel in alt_aliases:
+                    return room_id
+                
+                # Also check room name as fallback
+                room_name = getattr(room, 'display_name', None) or getattr(room, 'name', None)
+                if room_name and f"#{room_name}:themultiverse.school" == self.target_channel:
+                    return room_id
+        
+        logger.warning(f"Could not find room ID for target channel: {self.target_channel}")
+        return None 

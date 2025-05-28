@@ -206,37 +206,25 @@ class AutonomousChat:
     async def should_respond_to_message(self, room_id: str, room_name: Optional[str], 
                                       sender: str, content: str, 
                                       timestamp: Optional[datetime] = None) -> bool:
-        """Determine if the bot should respond to a specific message."""
+        """Determine if the bot should respond to a message based on priority."""
+        # Don't respond to our own messages
+        if sender == self.bot_user_id:
+            return False
+        
         # Check if autonomous chat is enabled in this room
         if not self.is_enabled_in_room(room_id):
             return False
         
-        # Don't respond to own messages
-        if sender == self.bot_user_id:
-            return False
-        
-        # Don't respond to command messages (messages starting with ! or containing command patterns)
-        stripped_content = content.strip()
-        if (stripped_content.startswith('!') or 
-            stripped_content.startswith('* !') or
-            stripped_content.startswith('> !') or
-            '!chat_' in stripped_content or
-            '!list_' in stripped_content or
-            '!join_' in stripped_content):
-            return False
-        
-        # Check rate limiting
+        # Check if we can respond now (rate limiting)
         if not self._can_respond_now(room_id):
             return False
         
-        # Add message to history
+        # Add the message to history first
         self.add_message_to_history(room_id, sender, content, timestamp)
         
-        # Check if message has vague references that might lack context
-        has_vague_refs = self._has_vague_references(content)
-        
-        # Check if sender has been trying to get attention
+        # Check for attention-seeking patterns
         seeking_attention = self._is_seeking_attention(room_id, sender)
+        has_vague_refs = self._has_vague_references(content)
         
         try:
             # Get conversation context
@@ -250,24 +238,33 @@ class AutonomousChat:
                 is_bot_message=False
             )
             
-            # Ask AI if we should respond
-            decision = await asyncio.to_thread(b.ShouldRespondToConversation, context, new_message)
+            # Get response priority from AI
+            priority_result = await asyncio.to_thread(b.GetResponsePriority, context, new_message)
             
-            # Adjust confidence threshold based on context
-            if seeking_attention:
-                confidence_threshold = 0.3  # Lower threshold if they're trying to get attention
-            elif has_vague_refs:
-                confidence_threshold = 0.6  # Higher threshold for vague references
-            else:
-                confidence_threshold = 0.4  # Normal threshold
+            print(f"Response priority for '{content[:50]}...': {priority_result.priority} - {priority_result.reasoning}")
             
-            print(f"Response decision for '{content[:50]}...': {decision.should_respond} (confidence: {decision.confidence:.2f}) - {decision.reasoning}")
-            if seeking_attention:
-                print(f"  Note: Sender appears to be seeking attention, using lower threshold ({confidence_threshold})")
-            elif has_vague_refs:
-                print(f"  Note: Message contains vague references, using higher threshold ({confidence_threshold})")
-            
-            return decision.should_respond and decision.confidence > confidence_threshold
+            # Determine response based on priority and context
+            if priority_result.priority.lower() == "high":
+                # Always respond to high priority messages
+                return True
+            elif priority_result.priority.lower() == "medium":
+                # Respond to medium priority based on context
+                if seeking_attention:
+                    print(f"  Note: Sender appears to be seeking attention, responding to medium priority")
+                    return True
+                elif has_vague_refs:
+                    print(f"  Note: Message contains vague references, skipping medium priority")
+                    return False
+                else:
+                    # Normal medium priority - respond most of the time
+                    return True
+            else:  # low priority
+                # Only respond to low priority if they're clearly seeking attention
+                if seeking_attention:
+                    print(f"  Note: Sender seeking attention, responding to low priority message")
+                    return True
+                else:
+                    return False
             
         except Exception as e:
             print(f"Error in should_respond_to_message: {e}")
