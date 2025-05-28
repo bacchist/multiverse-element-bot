@@ -495,27 +495,13 @@ class ArxivAutoPoster:
         return message
 
     async def _generate_paper_comment(self, paper) -> str:
-        """Generate a thoughtful comment about the paper using BAML with full paper content."""
+        """Generate a thoughtful comment about the paper using BAML WritePost."""
         try:
-            # Try to use BAML for comment generation with full paper content
             from baml_client.sync_client import b
             
-            # Prepare context for more insightful comments
-            authors_str = ", ".join(paper.authors[:2])  # Just first 2 authors
-            categories_str = ", ".join(paper.categories[:2])
+            logger.info(f"Generating post for paper: {paper.title[:50]}...")
             
-            # Focus on what makes this paper interesting/trending
-            trending_info = ""
-            if paper.altmetric_score and paper.altmetric_score >= 5.0:
-                trending_info = f"High social engagement (Altmetric: {paper.altmetric_score:.1f}). "
-            elif paper.altmetric_data:
-                tweets = paper.altmetric_data.get('cited_by_tweeters_count', 0)
-                if tweets >= 5:
-                    trending_info = f"Getting attention on social media ({tweets} tweets). "
-            
-            logger.info(f"Generating enhanced comment with full paper content for: {paper.title[:50]}...")
-            
-            # Step 1: Try to crawl the full paper content (following prepare_thread_data pattern)
+            # Try to crawl the full paper content (we always have the URL)
             try:
                 # Check if we have access to the crawler
                 crawler = getattr(self.bot, 'crawler', None)
@@ -535,95 +521,58 @@ class ArxivAutoPoster:
                     if result and hasattr(result, 'markdown') and result.markdown:
                         logger.debug(f"Successfully crawled paper content ({len(result.markdown)} chars)")
                         
-                        # Step 2: Parse the paper content (following prepare_thread_data pattern)
+                        # Parse the full paper content
                         parsed_paper = b.ParsePaper(result.markdown)
                         
-                        # Step 3: Summarize the parsed paper (following prepare_thread_data pattern)
+                        # Summarize the parsed paper
                         paper_summary = b.WritePaperSummary(parsed_paper)
                         summary_text = "\n\n".join([p.text for p in paper_summary.summary])
                         
                         logger.debug(f"Generated paper summary ({len(summary_text)} chars)")
                         
-                        # Step 4: Generate comment based on the rich summary
-                        result = b.GenerateEnhancedPaperComment(
-                            title=paper.title,
-                            authors=authors_str,
-                            paper_summary=summary_text,
-                            categories=categories_str,
-                            altmetric_info=trending_info
+                        # Generate post using WritePost
+                        post = b.WritePost(
+                            url=paper.arxiv_url,
+                            summary=summary_text
                         )
                         
-                        logger.info(f"Enhanced comment from full content: {result.comment[:100]}...")
-                        return result.comment
+                        logger.info(f"Generated post from full content: {post.text[:100]}...")
+                        return post.text
                     else:
-                        logger.debug("No content from HTML crawl, falling back to abstract-based approach")
+                        logger.warning(f"Failed to crawl paper content from {html_url}")
                 else:
-                    logger.debug("No crawler available, falling back to abstract-based approach")
+                    logger.warning("No crawler available for enhanced post generation")
                     
             except Exception as crawl_error:
-                logger.debug(f"Crawling failed ({crawl_error}), falling back to abstract-based approach")
+                logger.warning(f"Crawling failed for {paper.arxiv_url}: {crawl_error}")
             
-            # Fallback: Use the enhanced abstract-based approach
-            logger.debug("Using enhanced abstract-based comment generation...")
-            
-            # Step 1: Create a detailed summary from the abstract (following the summarize pattern)
-            summary_result = b.SummarizeArxivPaper(
-                title=paper.title,
-                authors=authors_str,
-                abstract=paper.abstract,
-                categories=categories_str,
-                altmetric_info=trending_info
+            # If crawling failed, use WritePost with just the abstract as summary
+            logger.info("Falling back to post generation from abstract...")
+            post = b.WritePost(
+                url=paper.arxiv_url,
+                summary=paper.abstract
             )
-            
-            logger.debug(f"Abstract-based summary: {summary_result.comment[:100]}...")
-            
-            # Step 2: Generate an enhanced comment based on the summary
-            result = b.GenerateEnhancedPaperComment(
-                title=paper.title,
-                authors=authors_str,
-                paper_summary=summary_result.comment,
-                categories=categories_str,
-                altmetric_info=trending_info
-            )
-            
-            logger.info(f"Enhanced comment from abstract: {result.comment[:100]}...")
-            return result.comment
+            logger.info(f"Generated post from abstract: {post.text[:100]}...")
+            return post.text
             
         except Exception as e:
-            logger.error(f"Enhanced comment generation failed for paper '{paper.title[:50]}...': {e}")
+            logger.error(f"Post generation failed for paper '{paper.title[:50]}...': {e}")
             logger.error(f"Exception type: {type(e).__name__}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             
-            # Fallback to the original simple BAML function
-            try:
-                logger.info("Falling back to simple BAML comment generation...")
-                from baml_client.sync_client import b
-                result = b.GeneratePaperComment(
-                    title=paper.title,
-                    authors=authors_str,
-                    abstract=paper.abstract[:400],
-                    categories=categories_str,
-                    altmetric_info=trending_info,
-                    context="Generate a concise, insightful comment (1-2 sentences) about why this research is interesting or significant. Focus on the key insight, potential impact, or novel approach rather than just describing what it does."
-                )
-                logger.info(f"Simple BAML comment generated: {result.comment[:100]}...")
-                return result.comment
-            except Exception as e2:
-                logger.error(f"Simple BAML comment also failed: {e2}")
-                
-                # Final fallback to simple comment based on categories
-                if any(cat in ['cs.AI', 'cs.LG'] for cat in paper.categories):
-                    fallback = "Interesting new approach in AI/ML research worth checking out."
-                elif 'cs.CL' in paper.categories:
-                    fallback = "New developments in natural language processing."
-                elif 'cs.CV' in paper.categories:
-                    fallback = "Novel computer vision research with potential applications."
-                else:
-                    fallback = "New research that's gaining attention in the AI community."
-                
-                logger.info(f"Using fallback comment: {fallback}")
-                return fallback
+            # Final fallback to simple comment based on categories
+            if any(cat in ['cs.AI', 'cs.LG'] for cat in paper.categories):
+                fallback = "Interesting new approach in AI/ML research worth checking out."
+            elif 'cs.CL' in paper.categories:
+                fallback = "New developments in natural language processing."
+            elif 'cs.CV' in paper.categories:
+                fallback = "Novel computer vision research with potential applications."
+            else:
+                fallback = "New research that's gaining attention in the AI community."
+            
+            logger.info(f"Using fallback comment: {fallback}")
+            return fallback
 
     def get_status(self) -> Dict[str, Any]:
         """Get current status of the auto-poster."""

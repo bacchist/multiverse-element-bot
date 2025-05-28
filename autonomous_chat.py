@@ -1,11 +1,13 @@
 import asyncio
 import random
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from baml_client.sync_client import b
 from baml_client.types import Message, ConversationContext
+from baml_py import ClientRegistry
 from chat_logger import ChatLogger
 
 class AutonomousChat:
@@ -206,11 +208,7 @@ class AutonomousChat:
     async def should_respond_to_message(self, room_id: str, room_name: Optional[str], 
                                       sender: str, content: str, 
                                       timestamp: Optional[datetime] = None) -> bool:
-        """Determine if the bot should respond to a message based on priority."""
-        # Don't respond to our own messages
-        if sender == self.bot_user_id:
-            return False
-        
+        """Determine if the bot should respond to a message using simple heuristics."""
         # Check if autonomous chat is enabled in this room
         if not self.is_enabled_in_room(room_id):
             return False
@@ -219,14 +217,13 @@ class AutonomousChat:
         if not self._can_respond_now(room_id):
             return False
         
-        # Add the message to history first
-        self.add_message_to_history(room_id, sender, content, timestamp)
-        
-        # Check for attention-seeking patterns
+        # Simple heuristics for response decision
         seeking_attention = self._is_seeking_attention(room_id, sender)
         has_vague_refs = self._has_vague_references(content)
         
         try:
+            from baml_client.sync_client import b
+            
             # Get conversation context
             context = self._get_conversation_context(room_id, room_name)
             
@@ -238,38 +235,53 @@ class AutonomousChat:
                 is_bot_message=False
             )
             
-            # Get response priority from AI
-            priority_result = await asyncio.to_thread(b.GetResponsePriority, context, new_message)
+            # Simple decision logic based on heuristics
+            # Respond if:
+            # 1. Someone is seeking attention (multiple attempts to engage)
+            # 2. Message doesn't have vague references we can't understand
+            # 3. Random chance for natural conversation flow
             
-            print(f"Response priority for '{content[:50]}...': {priority_result.priority} - {priority_result.reasoning}")
-            
-            # Determine response based on priority and context
-            if priority_result.priority.lower() == "high":
-                # Always respond to high priority messages
+            if seeking_attention:
+                print(f"Responding: Sender appears to be seeking attention")
                 return True
-            elif priority_result.priority.lower() == "medium":
-                # Respond to medium priority based on context
-                if seeking_attention:
-                    print(f"  Note: Sender appears to be seeking attention, responding to medium priority")
-                    return True
-                elif has_vague_refs:
-                    print(f"  Note: Message contains vague references, skipping medium priority")
-                    return False
-                else:
-                    # Normal medium priority - respond most of the time
-                    return True
-            else:  # low priority
-                # Only respond to low priority if they're clearly seeking attention
-                if seeking_attention:
-                    print(f"  Note: Sender seeking attention, responding to low priority message")
-                    return True
-                else:
-                    return False
+            elif has_vague_refs:
+                print(f"Not responding: Message contains vague references")
+                return False
+            else:
+                # Random chance to respond for natural conversation flow
+                # Higher chance for shorter, more direct messages
+                response_chance = 0.3  # 30% base chance
+                if len(content) < 50:  # Short messages get higher chance
+                    response_chance = 0.5
+                
+                should_respond = random.random() < response_chance
+                print(f"Random response decision: {should_respond} (chance: {response_chance:.1f})")
+                return should_respond
             
         except Exception as e:
             print(f"Error in should_respond_to_message: {e}")
             return False
     
+    def _get_client_registry(self, use_high_temp: bool = False) -> Optional[Dict[str, Any]]:
+        """Create a client registry for BAML functions, optionally with high temperature."""
+        if not use_high_temp:
+            return None
+        
+        # Create client registry with maximum temperature for spicy responses
+        cr = ClientRegistry()
+        cr.add_llm_client(
+            name='SpicyChat',
+            provider='openai',
+            options={
+                "model": "gpt-4.1-nano",
+                "temperature": 1.0,
+                "api_key": os.environ.get('OPENAI_API_KEY')
+            }
+        )
+        cr.set_primary('SpicyChat')
+        
+        return {"client_registry": cr}
+
     async def generate_response(self, room_id: str, room_name: Optional[str], 
                               sender: str, content: str, 
                               timestamp: Optional[datetime] = None) -> Optional[str]:
@@ -286,8 +298,16 @@ class AutonomousChat:
                 is_bot_message=False
             )
             
-            # Generate response
-            response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message)
+            # Decide if we should use high temperature (20% chance for spicy responses)
+            use_high_temp = random.random() < 0.2
+            client_options = self._get_client_registry(use_high_temp)
+            
+            # Generate response with or without client registry
+            if client_options:
+                response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message, **client_options)
+                print(f"🌶️ Using high temperature (1.0) for spicy response")
+            else:
+                response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message)
             
             # Apply quirky behavior to the response
             quirky_message = self._apply_quirky_behavior(response.message, room_id)
@@ -298,7 +318,7 @@ class AutonomousChat:
             # Add the actual message that will be sent to history (not the original)
             self.add_message_to_history(room_id, self.bot_user_id, quirky_message)
             
-            print(f"Generated response (tone: {response.tone}): {response.message}")
+            print(f"Generated response: {response.message}")
             if quirky_message != response.message:
                 print(f"Applied quirky behavior: {quirky_message}")
             
@@ -329,8 +349,16 @@ class AutonomousChat:
             # Get conversation context
             context = self._get_conversation_context(room_id, room_name)
             
+            # Decide if we should use high temperature (20% chance for spicy responses)
+            use_high_temp = random.random() < 0.2
+            client_options = self._get_client_registry(use_high_temp)
+            
             # Check if bot wants to say something
-            spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context)
+            if client_options:
+                spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context, **client_options)
+                print(f"🌶️ Using high temperature (1.0) for spicy spontaneous message")
+            else:
+                spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context)
             
             if spontaneous.should_send and spontaneous.message:
                 # Apply quirky behavior to spontaneous message

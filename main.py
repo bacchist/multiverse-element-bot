@@ -54,9 +54,9 @@ try:
     arxiv_auto_poster = ArxivAutoPoster(
         bot=bot,
         target_channel="#ai-papers:themultiverse.school",  # Change this to your desired channel
-        max_posts_per_day=3,
-        posting_interval=timedelta(hours=6),
-        discovery_interval=timedelta(hours=8)
+        max_posts_per_day=999,  # Effectively no limit
+        posting_interval=timedelta(hours=4),
+        discovery_interval=timedelta(hours=1)
     )
     
     # Attach auto-poster to bot for command access
