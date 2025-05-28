@@ -25,6 +25,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
+# Quiet the noisy SQL and sync store logs
+logging.getLogger('aiosqlite').setLevel(logging.WARNING)
+logging.getLogger('niobot.utils.sync_store').setLevel(logging.WARNING)
+logging.getLogger('nio.rooms').setLevel(logging.INFO)
+
 # Initialize chat logger
 chat_logger = ChatLogger()
 
@@ -141,11 +146,13 @@ async def on_command_error(ctx: niobot.Context, error: Exception):
 
 @bot.on_event("message")
 async def on_message(room, message):
-    logging.info(f"Observed message from {getattr(message, 'sender', 'unknown')}: {getattr(message, 'body', str(message))}")
-    
-    # Log all messages to chat logs
     sender = getattr(message, 'sender', 'unknown')
     body = getattr(message, 'body', str(message))
+    
+    logging.info(f"Observed message from {sender}: {body}")
+    logging.debug(f"Message details - sender: {sender}, body: {body}, type: {type(message)}")
+    
+    # Log all messages to chat logs
     message_type = getattr(message, 'msgtype', 'm.text')
     room_name = getattr(room, 'display_name', None) or getattr(room, 'name', None)
     
@@ -154,6 +161,7 @@ async def on_message(room, message):
     timestamp = None
     if server_timestamp:
         timestamp = datetime.fromtimestamp(server_timestamp / 1000, timezone.utc)
+        logging.debug(f"Message timestamp: {timestamp}")
     
     # Log the message
     chat_logger.log_message(
@@ -169,6 +177,9 @@ async def on_message(room, message):
     message_time = datetime.fromtimestamp(getattr(message, 'server_timestamp', 0) / 1000, timezone.utc)
     now = datetime.now(timezone.utc)
     
+    logging.debug(f"Message time: {message_time}, Now: {now}, Bot startup: {BOT_STARTUP_TIME}")
+    logging.debug(f"Initial sync complete: {INITIAL_SYNC_COMPLETE}")
+    
     # Enhanced stale message detection
     # 1. Ignore messages from before the bot started
     # 2. During initial sync, be more aggressive about filtering old messages
@@ -181,31 +192,34 @@ async def on_message(room, message):
     
     # Check if message is from before bot startup
     if message_time < BOT_STARTUP_TIME:
-        logging.debug(f"Message is from before bot startup ({message_time} < {BOT_STARTUP_TIME}); ignoring as stale.")
+        logging.debug(f"FILTERED: Message is from before bot startup ({message_time} < {BOT_STARTUP_TIME}); ignoring as stale.")
         return
     
     # During initial sync, be more conservative about processing messages
     if not INITIAL_SYNC_COMPLETE:
         # During initial sync, only process very recent messages (last 5 minutes)
         if (now - message_time).total_seconds() > 300:  # 5 minutes
-            logging.debug(f"During initial sync, ignoring message older than 5 minutes ({(now - message_time).total_seconds():.0f}s old)")
+            logging.debug(f"FILTERED: During initial sync, ignoring message older than 5 minutes ({(now - message_time).total_seconds():.0f}s old)")
             return
         else:
-            logging.debug(f"During initial sync, processing recent message ({(now - message_time).total_seconds():.0f}s old)")
+            logging.debug(f"PROCESSING: During initial sync, processing recent message ({(now - message_time).total_seconds():.0f}s old)")
     
     # General fallback: ignore messages older than 1 hour
     if (now - message_time).total_seconds() > 3600:  # 1 hour fallback
-        logging.debug(f"Message is older than 1 hour ({(now - message_time).total_seconds():.0f}s); ignoring as stale.")
+        logging.debug(f"FILTERED: Message is older than 1 hour ({(now - message_time).total_seconds():.0f}s); ignoring as stale.")
         return
     
     # Skip processing bot's own messages for autonomous chat
     if sender == bot_config.USER_ID:
+        logging.debug(f"FILTERED: Skipping bot's own message")
         return
     
     # Skip autonomous chat for command messages (messages starting with command prefix)
     if body.startswith(bot.command_prefix):
-        logging.debug(f"Skipping autonomous chat for command message: {body}")
+        logging.debug(f"FILTERED: Skipping autonomous chat for command message: {body}")
         return
+    
+    logging.debug(f"PROCESSING: Message passed all filters, proceeding to autonomous chat")
     
     # Check for autonomous conversation response
     try:
@@ -242,8 +256,12 @@ async def on_message(room, message):
                         logging.debug("Debug - No thread info, sending as regular message")
                         # Send as regular message
                         await bot.send_message(room.room_id, response_text)
+        else:
+            logging.debug("No autonomous response generated")
     except Exception as e:
         logging.error(f"Error in autonomous chat: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Continue with existing URL processing logic
     url = next((word for word in body.split() if word.startswith(("http://", "https://"))), None)
