@@ -25,20 +25,20 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# Quiet the noisy SQL and sync store logs
-logging.getLogger('aiosqlite').setLevel(logging.WARNING)
-logging.getLogger('niobot.utils.sync_store').setLevel(logging.WARNING)
-logging.getLogger('nio.rooms').setLevel(logging.INFO)
-
-# Silence all the other noisy Matrix protocol logs
-logging.getLogger('nio.responses').setLevel(logging.WARNING)
-logging.getLogger('nio.client').setLevel(logging.WARNING)
-logging.getLogger('nio.events').setLevel(logging.WARNING)
-logging.getLogger('nio.api').setLevel(logging.WARNING)
-logging.getLogger('nio.http').setLevel(logging.WARNING)
-logging.getLogger('niobot.client').setLevel(logging.INFO)
-logging.getLogger('niobot.utils').setLevel(logging.WARNING)
-logging.getLogger('niobot.events').setLevel(logging.WARNING)
+# Completely silence all nio/niobot logs
+logging.getLogger('aiosqlite').setLevel(logging.CRITICAL)
+logging.getLogger('niobot.utils.sync_store').setLevel(logging.CRITICAL)
+logging.getLogger('nio.rooms').setLevel(logging.CRITICAL)
+logging.getLogger('nio.responses').setLevel(logging.CRITICAL)
+logging.getLogger('nio.client').setLevel(logging.CRITICAL)
+logging.getLogger('nio.events').setLevel(logging.CRITICAL)
+logging.getLogger('nio.api').setLevel(logging.CRITICAL)
+logging.getLogger('nio.http').setLevel(logging.CRITICAL)
+logging.getLogger('niobot.client').setLevel(logging.CRITICAL)
+logging.getLogger('niobot.utils').setLevel(logging.CRITICAL)
+logging.getLogger('niobot.events').setLevel(logging.CRITICAL)
+logging.getLogger('nio.client.async_client').setLevel(logging.CRITICAL)
+logging.getLogger('urllib3.connectionpool').setLevel(logging.CRITICAL)
 
 # Keep our bot logs at DEBUG level
 logging.getLogger('__main__').setLevel(logging.DEBUG)

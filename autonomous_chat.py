@@ -337,7 +337,8 @@ class AutonomousChat:
             
             # Generate response with or without client registry
             if client_options:
-                response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message, **client_options)
+                # Use the BAML documentation syntax: function(args, options_dict)
+                response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message, client_options)  # type: ignore
                 logger.info(f"🌶️ Using high temperature (1.0) for spicy response")
             else:
                 response = await asyncio.to_thread(b.GenerateChatResponse, context, new_message)
@@ -386,9 +387,9 @@ class AutonomousChat:
             use_high_temp = random.random() < 0.2
             client_options = self._get_client_registry(use_high_temp)
             
-            # Check if bot wants to say something
+            # Generate spontaneous message with or without client registry
             if client_options:
-                spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context, **client_options)
+                spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context, client_options)  # type: ignore
                 logger.info(f"🌶️ Using high temperature (1.0) for spicy spontaneous message")
             else:
                 spontaneous = await asyncio.to_thread(b.GenerateSpontaneousMessage, context)

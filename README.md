@@ -158,7 +158,7 @@ The bot automatically logs all chat activity to files in the `chat_logs/` direct
    ACCESS_TOKEN=your-matrix-access-token
    
    # External API configuration
-   API_URL=https://your-api-endpoint.com/api/posts
+   API_URL=https://your-api-endpoint.com
    API_TOKEN=your-api-token-here
    
    # OpenAI API configuration
@@ -195,7 +195,7 @@ For production, you can set environment variables directly instead of using a `.
 export HOMESERVER="https://matrix.themultiverse.school"
 export USER_ID="@your-bot:themultiverse.school" 
 export ACCESS_TOKEN="your-matrix-access-token"
-export API_URL="https://your-api-endpoint.com/api/posts"
+export API_URL="https://your-api-endpoint.com"
 export API_TOKEN="your-api-token-here"
 export OPENAI_API_KEY="your-openai-api-key-here"
 export OWNER_ID="@your-username:themultiverse.school"
