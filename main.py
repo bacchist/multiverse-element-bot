@@ -188,11 +188,36 @@ async def on_message(room, message):
     if sender == bot_config.USER_ID:
         return
     
+    # Skip autonomous chat for command messages (messages starting with command prefix)
+    if body.startswith(bot.command_prefix):
+        print(f"Skipping autonomous chat for command message: {body}")
+        return
+    
     # Check for autonomous conversation response
     try:
         autonomous_response = await autonomous_chat.handle_message(room, message)
         if autonomous_response:
-            await bot.send_message(room.room_id, autonomous_response)
+            # Handle both old string format and new dict format for backward compatibility
+            if isinstance(autonomous_response, str):
+                # Old format - just send as regular message
+                await bot.send_message(room.room_id, autonomous_response)
+            elif isinstance(autonomous_response, dict):
+                # New format - check for threading
+                response_text = autonomous_response.get('text')
+                thread_info = autonomous_response.get('thread_info')
+                
+                if response_text:
+                    if thread_info and thread_info.get('event_id'):
+                        # Send as threaded reply
+                        success = await autonomous_chat._send_threaded_message(
+                            bot, room.room_id, response_text, thread_info['event_id']
+                        )
+                        if not success:
+                            # Fallback to regular message if threading fails
+                            await bot.send_message(room.room_id, response_text)
+                    else:
+                        # Send as regular message
+                        await bot.send_message(room.room_id, response_text)
     except Exception as e:
         print(f"Error in autonomous chat: {e}")
     

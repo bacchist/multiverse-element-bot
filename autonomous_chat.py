@@ -204,6 +204,58 @@ class AutonomousChat:
         
         return {"client_registry": cr}
 
+    def _get_thread_info(self, message) -> Optional[Dict[str, Any]]:
+        """Extract thread information from a message if it's part of a thread."""
+        try:
+            # Check if the message has thread relation information
+            content = getattr(message, 'content', {})
+            relates_to = content.get('m.relates_to', {})
+            
+            # Check for thread relation
+            if relates_to.get('rel_type') == 'm.thread':
+                return {
+                    'event_id': relates_to.get('event_id'),
+                    'is_falling_back': relates_to.get('is_falling_back', True)
+                }
+            
+            # Check if this message itself could be a thread root
+            # (we might want to start a thread in response to it)
+            return None
+            
+        except Exception as e:
+            print(f"Error extracting thread info: {e}")
+            return None
+
+    async def _send_threaded_message(self, bot, room_id: str, message: str, thread_root_id: str) -> bool:
+        """Send a message as a threaded reply."""
+        try:
+            # Construct the threaded message content
+            content = {
+                "msgtype": "m.text",
+                "body": message,
+                "m.relates_to": {
+                    "rel_type": "m.thread",
+                    "event_id": thread_root_id,
+                    "is_falling_back": True,
+                    "m.in_reply_to": {
+                        "event_id": thread_root_id
+                    }
+                }
+            }
+            
+            # Send using the underlying Matrix client
+            response = await bot.room_send(
+                room_id=room_id,
+                message_type="m.room.message",
+                content=content
+            )
+            
+            return hasattr(response, 'event_id')
+            
+        except Exception as e:
+            print(f"Error sending threaded message: {e}")
+            return False
+
     async def generate_response(self, room_id: str, room_name: Optional[str], 
                               sender: str, content: str, 
                               timestamp: Optional[datetime] = None) -> Optional[str]:
@@ -304,8 +356,8 @@ class AutonomousChat:
             print(f"Error checking spontaneous message: {e}")
             return None
     
-    async def handle_message(self, room, message) -> Optional[str]:
-        """Main handler for incoming messages. Returns response if bot should respond."""
+    async def handle_message(self, room, message) -> Optional[Dict[str, Any]]:
+        """Main handler for incoming messages. Returns response info if bot should respond."""
         sender = getattr(message, 'sender', 'unknown')
         content = getattr(message, 'body', '')
         room_name = getattr(room, 'display_name', None) or getattr(room, 'name', None)
@@ -331,9 +383,18 @@ class AutonomousChat:
             print(f"Waiting {total_delay:.1f} seconds before responding...")
             await asyncio.sleep(total_delay)
             
-            return await self.generate_response(
+            response_text = await self.generate_response(
                 room.room_id, room_name, sender, content, timestamp
             )
+            
+            if response_text:
+                # Check if the original message was in a thread
+                thread_info = self._get_thread_info(message)
+                
+                return {
+                    'text': response_text,
+                    'thread_info': thread_info
+                }
         
         # Even if we don't respond to this message, add it to history
         if sender != self.bot_user_id:
