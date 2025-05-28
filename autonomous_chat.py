@@ -207,17 +207,31 @@ class AutonomousChat:
     def _get_thread_info(self, message) -> Optional[Dict[str, Any]]:
         """Extract thread information from a message if it's part of a thread."""
         try:
+            print(f"Debug - Message object type: {type(message)}")
+            print(f"Debug - Message attributes: {dir(message)}")
+            
             # Check if the message has thread relation information
             # The content might be directly on the message object or in a content attribute
             content = getattr(message, 'content', {})
+            print(f"Debug - Raw content from getattr: {content}")
+            
             if not content:
                 # Try to get it from the source if content is empty
                 source = getattr(message, 'source', {})
+                print(f"Debug - Source: {source}")
                 content = source.get('content', {})
+                print(f"Debug - Content from source: {content}")
+            
+            # Also try accessing it as a property if it exists
+            if hasattr(message, 'source') and hasattr(message.source, 'get'):
+                source_content = message.source.get('content', {})
+                print(f"Debug - Source content via property: {source_content}")
+                if source_content and not content:
+                    content = source_content
             
             relates_to = content.get('m.relates_to', {})
             
-            print(f"Debug - Message content: {content}")
+            print(f"Debug - Final content: {content}")
             print(f"Debug - Relates to: {relates_to}")
             
             # Check for thread relation
@@ -234,6 +248,8 @@ class AutonomousChat:
             
         except Exception as e:
             print(f"Error extracting thread info: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def _send_threaded_message(self, bot, room_id: str, message: str, thread_root_id: str) -> bool:
@@ -257,8 +273,7 @@ class AutonomousChat:
             
             print(f"Debug - Threaded message content: {content}")
             
-            # Send using the niobot send_message method with custom content
-            # First try using the underlying Matrix client
+            # Send using the underlying Matrix client
             try:
                 response = await bot.client.room_send(
                     room_id=room_id,
@@ -266,16 +281,35 @@ class AutonomousChat:
                     content=content
                 )
                 print(f"Debug - Threaded message response: {response}")
-                return hasattr(response, 'event_id')
+                print(f"Debug - Response type: {type(response)}")
+                print(f"Debug - Response attributes: {dir(response) if hasattr(response, '__dict__') else 'No __dict__'}")
+                
+                # Check if the response indicates success
+                if hasattr(response, 'event_id') and response.event_id:
+                    print(f"Debug - Threaded message sent successfully with event_id: {response.event_id}")
+                    return True
+                elif hasattr(response, 'transport_response') and hasattr(response.transport_response, 'status_code'):
+                    status = response.transport_response.status_code
+                    print(f"Debug - HTTP status: {status}")
+                    if 200 <= status < 300:
+                        print("Debug - HTTP status indicates success, assuming threaded message sent")
+                        return True
+                    else:
+                        print(f"Debug - HTTP status indicates failure: {status}")
+                        return False
+                else:
+                    print(f"Debug - Unexpected response format, assuming failure")
+                    return False
+                    
             except Exception as e:
-                print(f"Debug - Failed to send via client.room_send: {e}")
-                # Fallback: try using niobot's send_message but it might not preserve threading
-                await bot.send_message(room_id, message)
-                print("Debug - Sent as fallback regular message")
+                print(f"Debug - Exception during client.room_send: {e}")
+                print(f"Debug - Exception type: {type(e)}")
                 return False
             
         except Exception as e:
             print(f"Error sending threaded message: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     async def generate_response(self, room_id: str, room_name: Optional[str], 
@@ -384,6 +418,8 @@ class AutonomousChat:
         content = getattr(message, 'body', '')
         room_name = getattr(room, 'display_name', None) or getattr(room, 'name', None)
         
+        print(f"Debug - handle_message called for sender: {sender}, content: {content[:50]}...")
+        
         # Get timestamp
         server_timestamp = getattr(message, 'server_timestamp', None)
         timestamp = None
@@ -394,6 +430,8 @@ class AutonomousChat:
         should_respond = await self.should_respond_to_message(
             room.room_id, room_name, sender, content, timestamp
         )
+        
+        print(f"Debug - should_respond: {should_respond}")
         
         if should_respond:
             # Add realistic delay to simulate human reading/thinking time
@@ -409,9 +447,13 @@ class AutonomousChat:
                 room.room_id, room_name, sender, content, timestamp
             )
             
+            print(f"Debug - generated response_text: {response_text}")
+            
             if response_text:
                 # Check if the original message was in a thread
+                print("Debug - Checking for thread info...")
                 thread_info = self._get_thread_info(message)
+                print(f"Debug - thread_info result: {thread_info}")
                 
                 return {
                     'text': response_text,
@@ -422,6 +464,7 @@ class AutonomousChat:
         if sender != self.bot_user_id:
             self.add_message_to_history(room.room_id, sender, content, timestamp)
         
+        print("Debug - handle_message returning None")
         return None
     
     async def periodic_spontaneous_check(self, bot):
