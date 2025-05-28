@@ -50,18 +50,25 @@ class HydrationReminderHandler:
     
     def should_handle_message(self, room_id: str, sender: str, message_body: str) -> bool:
         """Check if this message should trigger the hydration reminder response."""
+        logger.debug(f"HYDRATION HANDLER: Checking message - room_id='{room_id}', sender='{sender}', body='{message_body}'")
+        logger.debug(f"HYDRATION HANDLER: Target room='{self.target_room_id}', target sender='{self.reminder_user_id}', target message='{self.target_message}'")
+        
         # Check if it's the right room
         if room_id != self.target_room_id:
+            logger.debug(f"HYDRATION HANDLER: Room mismatch - got '{room_id}', expected '{self.target_room_id}'")
             return False
         
         # Check if it's from the reminder bot
         if sender != self.reminder_user_id:
+            logger.debug(f"HYDRATION HANDLER: Sender mismatch - got '{sender}', expected '{self.reminder_user_id}'")
             return False
         
         # Check if it's the exact message we're looking for
         if message_body.strip() != self.target_message:
+            logger.debug(f"HYDRATION HANDLER: Message mismatch - got '{message_body.strip()}', expected '{self.target_message}'")
             return False
         
+        logger.debug("HYDRATION HANDLER: All checks passed - should handle this message!")
         return True
     
     async def handle_hydration_reminder(self, bot, room_id: str) -> bool:

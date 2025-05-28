@@ -188,55 +188,48 @@ class ArxivAutoPoster:
         
         return paper
 
+    async def refresh_altmetric_for_queue(self):
+        if ArxivAltmetricTracker is None or not self.queue:
+            return
+        async with ArxivAltmetricTracker() as tracker:
+            await tracker.enrich_with_altmetric(self.queue)
+
     async def run_maintenance_cycle(self):
         """Run a maintenance cycle - discover papers and post if needed."""
         if not self.enabled:
             return
-            
         try:
             now = datetime.now(timezone.utc)
-            
             # Check if we should discover new papers
             should_discover = (
                 self.last_discovery is None or 
                 (now - self.last_discovery) >= self.discovery_interval
             )
-            
             if should_discover:
+                # Refresh Altmetric data for all papers in the queue
+                await self.refresh_altmetric_for_queue()
                 new_papers = await self.discover_papers()
                 if new_papers:
                     # Filter out papers we've already posted or queued
                     existing_ids = {p.arxiv_id for p in self.queue} | set(self.posted_papers)
                     truly_new = [p for p in new_papers if p.arxiv_id not in existing_ids]
-                    
-                    # Re-rank existing queue with updated priority scores
-                    for paper in self.queue:
-                        paper.priority_score = paper._calculate_priority()
-                    
+                    # Re-rank existing queue with updated priority scores (already done in refresh)
                     # Add new papers to queue
                     self.queue.extend(truly_new)
-                    
                     # Sort entire queue by updated priority scores
                     self.queue.sort(key=lambda p: p.priority_score, reverse=True)
-                    
                     # Keep queue manageable
                     self.queue = self.queue[:50]
-                    
                     self.last_discovery = now
                     self.save_state()
-                    
                     logger.info(f"Discovery complete: {len(truly_new)} new papers added, queue re-ranked, now has {len(self.queue)} papers")
                 else:
-                    # Even if no new papers, re-rank existing queue
+                    # Even if no new papers, re-rank existing queue (already done in refresh)
                     if self.queue:
-                        for paper in self.queue:
-                            paper.priority_score = paper._calculate_priority()
                         self.queue.sort(key=lambda p: p.priority_score, reverse=True)
                         self.save_state()
                         logger.info(f"No new papers found, but re-ranked existing queue of {len(self.queue)} papers")
-                    
                     self.last_discovery = now
-            
             # Check if we should post a paper (with lock to coordinate with manual posts)
             async with self._posting_lock:
                 should_post = (
@@ -244,35 +237,28 @@ class ArxivAutoPoster:
                     len(self.posted_today) < self.max_posts_per_day and
                     (self.last_posting is None or (now - self.last_posting) >= self.posting_interval)
                 )
-                
                 if should_post:
                     # Post directly within the lock (avoid calling post_next_paper to prevent deadlock)
                     try:
                         # Get the highest priority paper
                         paper = self.queue.pop(0)
-                        
                         # Get the actual room ID for the target channel
                         target_room_id = self._get_target_room_id()
                         if not target_room_id:
                             logger.error(f"Cannot post paper: target room '{self.target_channel}' not found or bot not in room")
                             return
-                        
                         # Generate and send the post
                         message = await self._format_paper_for_posting(paper)
                         await self.bot.send_message(target_room_id, message)
-                        
                         # Update tracking
                         self.posted_today.append(paper.arxiv_id)
                         self.posted_papers.add(paper.arxiv_id)
                         self.posted_total += 1
                         self.last_posting = datetime.now(timezone.utc)
                         self.save_state()
-                        
                         logger.info(f"Posted paper (auto): {paper.title[:50]}... (Score: {paper.priority_score:.1f})")
-                        
                     except Exception as e:
                         logger.error(f"Error posting paper (auto): {e}")
-                
         except Exception as e:
             logger.error(f"Error in auto-poster maintenance cycle: {e}")
 

@@ -237,7 +237,11 @@ async def on_message(room, message):
     
     # Check for hydration reminder message BEFORE other processing
     try:
-        if hydration_handler.should_handle_message(room.room_id, sender, body):
+        logging.debug(f"HYDRATION CHECK: room_id={room.room_id}, sender={sender}, body='{body}'")
+        should_handle = hydration_handler.should_handle_message(room.room_id, sender, body)
+        logging.debug(f"HYDRATION CHECK: should_handle={should_handle}")
+        
+        if should_handle:
             logging.info(f"Hydration reminder detected from {sender} in {room.room_id}")
             success = await hydration_handler.handle_hydration_reminder(bot, room.room_id)
             if success:
