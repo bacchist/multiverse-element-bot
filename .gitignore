@@ -21,7 +21,7 @@ ENV/
 
 # Logs and local data
 *.log
-bot.log
+bot.log.*
 urls.txt
 article.txt
 store/
