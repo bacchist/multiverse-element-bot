@@ -30,6 +30,22 @@ logging.getLogger('aiosqlite').setLevel(logging.WARNING)
 logging.getLogger('niobot.utils.sync_store').setLevel(logging.WARNING)
 logging.getLogger('nio.rooms').setLevel(logging.INFO)
 
+# Silence all the other noisy Matrix protocol logs
+logging.getLogger('nio.responses').setLevel(logging.WARNING)
+logging.getLogger('nio.client').setLevel(logging.WARNING)
+logging.getLogger('nio.events').setLevel(logging.WARNING)
+logging.getLogger('nio.api').setLevel(logging.WARNING)
+logging.getLogger('nio.http').setLevel(logging.WARNING)
+logging.getLogger('niobot.client').setLevel(logging.INFO)
+logging.getLogger('niobot.utils').setLevel(logging.WARNING)
+logging.getLogger('niobot.events').setLevel(logging.WARNING)
+
+# Keep our bot logs at DEBUG level
+logging.getLogger('__main__').setLevel(logging.DEBUG)
+logging.getLogger('autonomous_chat').setLevel(logging.DEBUG)
+logging.getLogger('bot_commands').setLevel(logging.DEBUG)
+logging.getLogger('arxiv_auto_poster').setLevel(logging.DEBUG)
+
 # Initialize chat logger
 chat_logger = ChatLogger()
 

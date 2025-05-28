@@ -277,16 +277,15 @@ class AutonomousChat:
             
             logger.debug(f"Debug - Threaded message content: {content}")
             
-            # Send using the underlying Matrix client
+            # Send using niobot's room_send method with custom content
             try:
-                response = await bot.client.room_send(
+                response = await bot.room_send(
                     room_id=room_id,
                     message_type="m.room.message",
                     content=content
                 )
                 logger.debug(f"Debug - Threaded message response: {response}")
                 logger.debug(f"Debug - Response type: {type(response)}")
-                logger.debug(f"Debug - Response attributes: {dir(response) if hasattr(response, '__dict__') else 'No __dict__'}")
                 
                 # Check if the response indicates success
                 if hasattr(response, 'event_id') and response.event_id:
@@ -306,7 +305,7 @@ class AutonomousChat:
                     return False
                     
             except Exception as e:
-                logger.debug(f"Debug - Exception during client.room_send: {e}")
+                logger.debug(f"Debug - Exception during bot.room_send: {e}")
                 logger.debug(f"Debug - Exception type: {type(e)}")
                 return False
             
