@@ -498,29 +498,9 @@ class ArxivAutoPoster:
         # Generate insightful comment using BAML
         comment = await self._generate_paper_comment(paper)
         
-        # Add Altmetric context if it's particularly noteworthy
-        trending_context = ""
-        if paper.altmetric_score and paper.altmetric_score >= 5.0:
-            trending_context = f" (🔥 Trending: {paper.altmetric_score:.0f} Altmetric score)"
-        elif paper.altmetric_data:
-            # Check for notable social engagement
-            tweets = paper.altmetric_data.get('cited_by_tweeters_count', 0)
-            reddit = paper.altmetric_data.get('cited_by_rdts_count', 0)
-            news = paper.altmetric_data.get('cited_by_feeds_count', 0)
-            
-            if tweets >= 10:
-                trending_context = f" (🐦 {tweets} tweets)"
-            elif reddit >= 3:
-                trending_context = f" (🔴 Popular on Reddit)"
-            elif news >= 2:
-                trending_context = f" (📰 News coverage)"
-        
-        # Simple, concise format
-        message = f"""🤖 **{paper.title}**{trending_context}
+        message = f"""{comment}
 
-{comment}
-
-🔗 {paper.arxiv_url}"""
+        🔗 {paper.arxiv_url}""" 
         
         return message
 
