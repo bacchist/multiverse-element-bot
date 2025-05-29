@@ -189,10 +189,39 @@ class ArxivAutoPoster:
         return paper
 
     async def refresh_altmetric_for_queue(self):
+        """Refresh Altmetric data for all papers currently in the queue."""
         if ArxivAltmetricTracker is None or not self.queue:
             return
-        async with ArxivAltmetricTracker() as tracker:
-            await tracker.enrich_with_altmetric(self.queue)
+            
+        try:
+            logger.info(f"Refreshing Altmetric data for {len(self.queue)} papers in queue...")
+            queue_before = [(p.arxiv_id, p.altmetric_score) for p in self.queue]
+            
+            async with ArxivAltmetricTracker() as tracker:
+                await tracker.enrich_with_altmetric(self.queue)
+            
+            # Log changes in Altmetric scores
+            updates = []
+            for (paper_id, old_score), paper in zip(queue_before, self.queue):
+                if old_score != paper.altmetric_score:
+                    updates.append(f"{paper_id}: {old_score or 0:.1f} → {paper.altmetric_score or 0:.1f}")
+            
+            if updates:
+                logger.info(f"Updated Altmetric scores for {len(updates)} papers:")
+                for update in updates:
+                    logger.info(f"  • {update}")
+                
+                # Re-sort queue by updated priority scores
+                self.queue.sort(key=lambda p: p.priority_score, reverse=True)
+                # Save state to persist the updates
+                self.save_state()
+                logger.info("Queue re-ranked and state saved with updated Altmetric data")
+            else:
+                logger.info("No changes in Altmetric scores detected")
+                
+        except Exception as e:
+            logger.error(f"Error refreshing Altmetric data: {e}")
+            # Continue execution - don't let Altmetric failures break the bot
 
     async def run_maintenance_cycle(self):
         """Run a maintenance cycle - discover papers and post if needed."""

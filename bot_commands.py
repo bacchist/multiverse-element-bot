@@ -611,6 +611,9 @@ All settings are automatically saved and persist across bot restarts."""
             # Get current queue size before discovery
             queue_before = len(auto_poster.queue)
             
+            # First refresh altmetric data for existing queue papers
+            await auto_poster.refresh_altmetric_for_queue()
+            
             # Run discovery (this now includes trending filtering)
             new_papers = await auto_poster.discover_papers()
             
@@ -640,6 +643,7 @@ All settings are automatically saved and persist across bot restarts."""
 • Found {len(new_papers)} trending papers
 • Added {added_count} new papers to queue
 • Queue: {queue_before} → {queue_after} papers
+• Refreshed Altmetric data for existing queue papers
 
 🔥 **Trending Filters Applied:**
 • Only papers meeting trending criteria were queued
