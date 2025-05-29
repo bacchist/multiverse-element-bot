@@ -210,10 +210,15 @@ class ArxivAutoPoster:
                 await self.refresh_altmetric_for_queue()
                 new_papers = await self.discover_papers()
                 if new_papers:
+                    # Update existing queue papers with latest data from new_papers
+                    queue_id_to_index = {p.arxiv_id: i for i, p in enumerate(self.queue)}
+                    for new_paper in new_papers:
+                        idx = queue_id_to_index.get(new_paper.arxiv_id)
+                        if idx is not None:
+                            self.queue[idx] = new_paper
                     # Filter out papers we've already posted or queued
                     existing_ids = {p.arxiv_id for p in self.queue} | set(self.posted_papers)
                     truly_new = [p for p in new_papers if p.arxiv_id not in existing_ids]
-                    # Re-rank existing queue with updated priority scores (already done in refresh)
                     # Add new papers to queue
                     self.queue.extend(truly_new)
                     # Sort entire queue by updated priority scores
