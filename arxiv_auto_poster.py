@@ -703,9 +703,10 @@ class ArxivAutoPoster:
         # Generate insightful comment using BAML
         comment = await self._generate_paper_comment(paper)
         
+        # Simple format with just comment and raw URL for Matrix rich previews
         message = f"""{comment}
 
-        🔗 {paper.arxiv_url}""" 
+{paper.arxiv_url}"""
         
         return message
 
