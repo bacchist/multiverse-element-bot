@@ -41,6 +41,7 @@ class FigureSummary {
 
 class PaperSummary {
   summary Paragraph[]
+  accessibility "low" | "medium" | "high" @description("The accessibility of the paper. Low accessibility means the paper is not accessible to non-experts. Medium accessibility means the paper is accessible to non-experts but requires significant prior knowledge of the subject matter. High accessibility means the paper is accessible to non-experts with limited prior knowledge of the subject matter.")
 }
 
 function ParseArticle(article: string) -> Article {
@@ -83,7 +84,7 @@ function WriteArticleSummary(article: Article) -> ArticleSummary {
 function WritePaperSummary(paper: Paper) -> PaperSummary {
   client CustomGPT41Nano
   prompt #"
-    Write a multi-paragraph summary of the research paper:
+    Write a multi-paragraph summary of the paper and assess its accessibility:
 
     {{ ctx.output_format }}
 

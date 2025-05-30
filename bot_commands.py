@@ -564,10 +564,17 @@ All settings are automatically saved and persist across bot restarts."""
             
             status = auto_poster.get_status()
             
+            pool_age_info = ""
+            if status['pool_age_stats']:
+                stats = status['pool_age_stats']
+                pool_age_info = f"\n**Pool Age**: {stats['min_age_days']}-{stats['max_age_days']} days (avg: {stats['avg_age_days']:.1f})"
+            
             response = f"""📊 **ArXiv Auto-Poster Status**
 
 **Enabled**: {status['enabled']}
-**Queue**: {status['queue_size']} papers waiting
+**Pool**: {status['pool_size']}/{status['max_pool_size']} papers (retained for {status['pool_retention_days']} days){pool_age_info}
+**Candidates**: {status['candidates_count']}/{status['max_candidates']} papers ready for posting
+**Blacklist**: {status['blacklist_size']} papers filtered out
 **Posted**: {status['posted_total']} total papers
 **Today**: {status['posts_today']}/{status['max_posts_per_day']} posts
 **Target**: {status['target_channel']}
@@ -604,54 +611,40 @@ All settings are automatically saved and persist across bot restarts."""
                 self._log_bot_response(ctx, response)
                 return
             
-            response = f"🔍 Starting manual discovery with trending filters..."
+            response = f"🔍 Starting manual discovery...\n\n**Before:** {len(auto_poster.pool)} papers in pool, {len(auto_poster.candidates)} candidates"
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
             
-            # Get current queue size before discovery
-            queue_before = len(auto_poster.queue)
+            # Refresh Altmetric data for existing pool papers
+            await auto_poster.refresh_altmetric_for_pool()
             
-            # First refresh altmetric data for existing queue papers
-            await auto_poster.refresh_altmetric_for_queue()
-            
-            # Run discovery (this now includes trending filtering)
+            # Discover new papers
             new_papers = await auto_poster.discover_papers()
             
             if new_papers:
-                # Filter out papers we've already posted or queued
-                existing_ids = {p.arxiv_id for p in auto_poster.queue} | set(auto_poster.posted_papers)
-                truly_new = [p for p in new_papers if p.arxiv_id not in existing_ids]
-                
-                # Add to queue (sorted by priority)
-                auto_poster.queue.extend(truly_new)
-                auto_poster.queue.sort(key=lambda p: p.priority_score, reverse=True)
-                
-                # Keep queue manageable
-                auto_poster.queue = auto_poster.queue[:50]
-                
-                # Update discovery time and save state
-                from datetime import datetime, timezone
-                auto_poster.last_discovery = datetime.now(timezone.utc)
+                # Add to pool and update candidates
+                auto_poster.pool.extend(new_papers)
+                auto_poster.pool.sort(key=lambda p: p.priority_score, reverse=True)
+                auto_poster.pool = auto_poster.pool[:auto_poster.max_pool_size]
+                await auto_poster._update_candidates()
                 auto_poster.save_state()
                 
-                queue_after = len(auto_poster.queue)
-                added_count = len(truly_new)
+                response = f"✅ **Discovery Complete!**\n\n"
+                response += f"📊 **Results:**\n"
+                response += f"• Found {len(new_papers)} new trending papers\n"
+                response += f"• Pool now has {len(auto_poster.pool)}/{auto_poster.max_pool_size} papers\n"
+                response += f"• {len(auto_poster.candidates)}/{auto_poster.max_candidates} candidates ready for posting\n"
+                response += f"• {len(auto_poster.blacklist)} papers blacklisted\n\n"
                 
-                response = f"""✅ **Discovery Complete!**
-
-📊 **Results:**
-• Found {len(new_papers)} trending papers
-• Added {added_count} new papers to queue
-• Queue: {queue_before} → {queue_after} papers
-• Refreshed Altmetric data for existing queue papers
-
-🔥 **Trending Filters Applied:**
-• Only papers meeting trending criteria were queued
-• Use `!arxiv_criteria` to see filtering rules
-• Use `!arxiv_queue` to see top queued papers"""
+                if auto_poster.candidates:
+                    top_candidate = auto_poster.candidates[0]
+                    response += f"🏆 **Top Candidate:**\n{top_candidate.title[:100]}...\n"
+                    response += f"Priority: {top_candidate.priority_score:.1f} | Altmetric: {top_candidate.altmetric_score or 0:.1f} | Accessibility: {top_candidate.accessibility}\n\n"
                 
+                response += f"Use `!arxiv_candidates` to see all candidates or `!arxiv_post` to post the top one."
             else:
-                response = "📭 No trending papers found that meet the criteria"
+                response = f"📭 **No new papers found**\n\n"
+                response += f"Pool still has {len(auto_poster.pool)} papers, {len(auto_poster.candidates)} candidates ready."
             
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
@@ -706,8 +699,8 @@ All settings are automatically saved and persist across bot restarts."""
 
     @niobot.command()
     @niobot.is_owner()
-    async def arxiv_queue(self, ctx: niobot.Context, count: int = 5):
-        """Show papers in the posting queue. Owner only."""
+    async def arxiv_pool(self, ctx: niobot.Context):
+        """Show papers in the pool and current candidates. Owner only."""
         try:
             auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
             if not auto_poster:
@@ -716,28 +709,45 @@ All settings are automatically saved and persist across bot restarts."""
                 self._log_bot_response(ctx, response)
                 return
             
-            if not auto_poster.queue:
-                response = "📭 Queue is empty"
+            if not auto_poster.enabled:
+                response = "❌ ArXiv auto-poster is disabled (missing dependencies)"
                 await ctx.respond(response)
                 self._log_bot_response(ctx, response)
                 return
             
-            count = max(1, min(count, 10))  # Limit to 1-10 papers
-            queue_papers = auto_poster.queue[:count]
+            # Show candidates first
+            candidates = auto_poster.candidates
+            if candidates:
+                response = f"🎯 **Current Candidates ({len(candidates)}/{auto_poster.max_candidates})**\n\n"
+                for i, paper in enumerate(candidates, 1):
+                    accessibility_str = f" | Access: {paper.accessibility or 'unknown'}"
+                    response += f"**#{i}. {paper.title[:60]}{'...' if len(paper.title) > 60 else ''}**\n"
+                    response += f"   Priority: {paper.priority_score:.1f} | Altmetric: {paper.altmetric_score or 0:.1f}{accessibility_str}\n"
+                    response += f"   Categories: {', '.join(paper.categories[:2])}\n"
+                    response += f"   🔗 {paper.arxiv_url}\n\n"
+            else:
+                response = "🎯 **No candidates currently available**\n\n"
             
-            response = f"📋 **Top {len(queue_papers)} Papers in Queue** (of {len(auto_poster.queue)} total)\n\n"
-            
-            for i, paper in enumerate(queue_papers, 1):
-                response += f"**#{i}. {paper.title[:60]}{'...' if len(paper.title) > 60 else ''}**\n"
-                response += f"   Priority: {paper.priority_score:.1f} | Altmetric: {paper.altmetric_score or 0:.1f}\n"
-                response += f"   Categories: {', '.join(paper.categories[:2])}\n"
-                response += f"   🔗 {paper.arxiv_url}\n\n"
+            # Show pool summary
+            pool_papers = auto_poster.pool
+            if pool_papers:
+                response += f"🏊 **Pool Summary ({len(pool_papers)}/{auto_poster.max_pool_size} papers)**\n"
+                response += f"Retention: {auto_poster.pool_retention_days} days | Blacklisted: {len(auto_poster.blacklist)} papers\n\n"
+                
+                # Show top 10 pool papers
+                response += "**Top 10 Pool Papers:**\n"
+                for i, paper in enumerate(pool_papers[:10], 1):
+                    accessibility_str = f" | Access: {paper.accessibility or 'unknown'}"
+                    response += f"{i}. {paper.title[:50]}{'...' if len(paper.title) > 50 else ''}\n"
+                    response += f"   Priority: {paper.priority_score:.1f} | Altmetric: {paper.altmetric_score or 0:.1f}{accessibility_str}\n\n"
+            else:
+                response += "🏊 **Pool is empty**"
             
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
             
         except Exception as e:
-            response = f"❌ Error showing queue: {str(e)}"
+            response = f"❌ Error getting pool status: {str(e)}"
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
 
@@ -935,9 +945,16 @@ Use `!arxiv_config <setting> <value>` to change settings."""
                 self._log_bot_response(ctx, response)
                 return
             
-            criteria = """🔥 **Trending Paper Criteria**
+            criteria = """🔥 **Paper Selection Criteria**
 
-Papers must meet **at least one** of these criteria to be queued for posting:
+Papers go through a multi-stage filtering process:
+
+**🔍 Stage 1: Discovery**
+• Papers from last 3 days in AI/ML categories
+• Excludes already posted, blacklisted, or pooled papers
+
+**🎯 Stage 2: Trending Criteria**
+Papers must meet **at least one** of these criteria:
 
 **🏆 Tier 1 - High Impact:**
 • Altmetric score ≥ 5.0 (strong social engagement)
@@ -960,15 +977,23 @@ Papers must meet **at least one** of these criteria to be queued for posting:
 • Quality AI papers with priority score ≥ 60.0
 
 **🛡️ Last Resort:**
-• If no papers meet criteria, top 3 papers by priority score
+• Very recent papers (<6h) in any AI category with priority ≥ 40.0
 
-**📊 Priority Score Calculation:**
-• Altmetric score × 10-20 (exponential scaling)
-• Recency bonus: 50pts for <24h, 25pts for 24-48h
-• Category bonus: cs.AI(25), cs.LG(20), cs.CL/CV(15)
-• Social engagement: tweets(2pt each), Reddit(5pt), news(10pt)
+**🏊 Pool Management:**
+• Papers stored for up to 14 days with continuous freshness decay
+• Altmetric scores refreshed with tiered frequency (4h → 1d → 3d)
 
-This ensures the queue always has papers while prioritizing those with genuine trending signals."""
+**♿ Stage 3: Candidate Selection & Accessibility**
+• Top papers from pool are evaluated for accessibility (LLM assessment)
+• Papers with "low" accessibility are blacklisted and removed
+• Papers with "high" accessibility get 20% priority bonus
+• Only accessible papers become candidates for posting
+
+**📊 Priority Scoring:**
+• Exponential Altmetric weighting: (score + 1)²
+• Extended freshness decay over 14 days (can go negative)
+• Category bonuses for AI/ML fields
+• Accessibility multipliers applied after assessment (high: +20%, medium: 0%)"""
             
             await ctx.respond(criteria)
             self._log_bot_response(ctx, criteria)
@@ -980,85 +1005,88 @@ This ensures the queue always has papers while prioritizing those with genuine t
 
     @niobot.command()
     @niobot.is_owner()
-    async def hydration_status(self, ctx: niobot.Context):
-        """Check the current hydration reminder counter. Owner only."""
+    async def arxiv_remove_candidate(self, ctx: niobot.Context, arxiv_id: str):
+        """Remove a paper from candidates and add to blacklist. Owner only."""
         try:
-            # Get the hydration handler from the main module
-            import main
-            hydration_handler = getattr(main, 'hydration_handler', None)
-            
-            if not hydration_handler:
-                response = "❌ Hydration reminder handler not available"
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
                 await ctx.respond(response)
                 self._log_bot_response(ctx, response)
                 return
             
-            count = hydration_handler.current_count
+            if not auto_poster.enabled:
+                response = "❌ ArXiv auto-poster is disabled (missing dependencies)"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
             
-            # Determine the bot's current state based on count
-            if count == 0:
-                state = "😊 Fresh and optimistic"
-            elif count < 10:
-                state = "😌 Appreciative and upbeat"
-            elif count < 20:
-                state = "😐 Getting a bit tired"
-            elif count < 30:
-                state = "😒 Doubt setting in"
-            elif count < 50:
-                state = "😠 Irritated and hostile"
-            elif count < 70:
-                state = "😡 Very hostile, feeling targeted"
-            elif count < 90:
-                state = "🤯 Unhinged, fragmenting"
+            # Clean up the arxiv_id (remove any URL parts)
+            if '/' in arxiv_id:
+                arxiv_id = arxiv_id.split('/')[-1]
+            if arxiv_id.startswith('arxiv:'):
+                arxiv_id = arxiv_id[6:]
+            
+            success = auto_poster.remove_candidate(arxiv_id)
+            
+            if success:
+                response = f"✅ Removed candidate {arxiv_id} and added to blacklist"
             else:
-                state = "💀 Terminal madness"
-            
-            response = f"""💧 **Hydration Reminder Status**
-
-Current count: **{count}**
-Bot state: {state}
-
-Target: `@reminder:themultiverse.school` in `#neurospicy:themultiverse.school`
-Watching for: `@room Don't forget to drink water!`
-
-The bot's responses become increasingly unhinged as the counter grows."""
+                response = f"❌ Paper {arxiv_id} not found in candidates"
             
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
             
         except Exception as e:
-            response = f"❌ Error checking hydration status: {str(e)}"
+            response = f"❌ Error removing candidate: {str(e)}"
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
 
     @niobot.command()
     @niobot.is_owner()
-    async def hydration_reset(self, ctx: niobot.Context):
-        """Reset the hydration reminder counter to 0. Owner only."""
+    async def arxiv_candidates(self, ctx: niobot.Context):
+        """Show current candidates with detailed information. Owner only."""
         try:
-            # Get the hydration handler from the main module
-            import main
-            hydration_handler = getattr(main, 'hydration_handler', None)
-            
-            if not hydration_handler:
-                response = "❌ Hydration reminder handler not available"
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
                 await ctx.respond(response)
                 self._log_bot_response(ctx, response)
                 return
             
-            previous_count = hydration_handler.reset_counter()
+            if not auto_poster.enabled:
+                response = "❌ ArXiv auto-poster is disabled (missing dependencies)"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
             
-            response = f"""💧 **Hydration Counter Reset**
-
-Previous count: **{previous_count}**
-New count: **0**
-
-The bot has been restored to its fresh, optimistic state! 😊"""
+            candidates = auto_poster.candidates
+            if not candidates:
+                response = "🎯 **No candidates currently available**\n\nCandidates are automatically selected from the top papers in the pool."
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            response = f"🎯 **Current Candidates ({len(candidates)}/{auto_poster.max_candidates})**\n\n"
+            
+            for i, paper in enumerate(candidates, 1):
+                # Calculate age
+                from datetime import datetime, timezone
+                age_hours = (datetime.now(timezone.utc) - paper.published).total_seconds() / 3600
+                age_str = f"{age_hours:.1f}h" if age_hours < 48 else f"{age_hours/24:.1f}d"
+                
+                response += f"**#{i}. {paper.title}**\n"
+                response += f"📊 Priority: {paper.priority_score:.1f} | Altmetric: {paper.altmetric_score or 0:.1f} | Age: {age_str}\n"
+                response += f"♿ Accessibility: {paper.accessibility or 'unknown'}\n"
+                response += f"📂 Categories: {', '.join(paper.categories)}\n"
+                response += f"👥 Authors: {', '.join(paper.authors[:3])}{'...' if len(paper.authors) > 3 else ''}\n"
+                response += f"🔗 {paper.arxiv_url}\n"
+                response += f"🗑️ Remove: `!arxiv_remove_candidate {paper.arxiv_id}`\n\n"
             
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
             
         except Exception as e:
-            response = f"❌ Error resetting hydration counter: {str(e)}"
+            response = f"❌ Error showing candidates: {str(e)}"
             await ctx.respond(response)
             self._log_bot_response(ctx, response) 

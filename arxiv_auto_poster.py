@@ -52,12 +52,19 @@ class ArxivAutoPoster:
         self.discovery_interval = discovery_interval
         
         # State tracking
-        self.queue: List = []
+        self.pool: List = []  # Renamed from queue - papers stored for up to 2 weeks
+        self.candidates: List = []  # Top 5 papers elevated for posting consideration
+        self.blacklist: Set[str] = set()  # Papers rejected/filtered to avoid re-evaluation
         self.posted_today: List[str] = []  # arXiv IDs posted today
         self.posted_papers: Set[str] = set()  # All posted papers (persistent)
         self.last_discovery: Optional[datetime] = None
         self.last_posting: Optional[datetime] = None
         self.posted_total = 0
+        
+        # Pool management settings
+        self.pool_retention_days = 14  # Keep papers for 2 weeks
+        self.max_pool_size = 200  # Increased from 50 to accommodate longer retention
+        self.max_candidates = 5  # Number of papers elevated to candidate status
         
         # Posting coordination (CRITICAL FIX: Prevent double posting)
         self._posting_lock = asyncio.Lock()
@@ -85,15 +92,30 @@ class ArxivAutoPoster:
                 posted_papers_list = state.get('posted_papers', [])
                 self.posted_papers = set(posted_papers_list)
                 
-                # Load queue
-                queue_data = state.get('queue', [])
-                self.queue = []
-                for paper_data in queue_data:
+                # Load blacklist
+                blacklist_list = state.get('blacklist', [])
+                self.blacklist = set(blacklist_list)
+                
+                # Load pool (formerly queue)
+                pool_data = state.get('pool', state.get('queue', []))  # Backward compatibility
+                self.pool = []
+                for paper_data in pool_data:
                     try:
                         paper = self._deserialize_paper(paper_data)
-                        self.queue.append(paper)
+                        self.pool.append(paper)
                     except Exception as e:
-                        logger.warning(f"Error deserializing paper from queue: {e}")
+                        logger.warning(f"Error deserializing paper from pool: {e}")
+                        continue
+                
+                # Load candidates
+                candidates_data = state.get('candidates', [])
+                self.candidates = []
+                for paper_data in candidates_data:
+                    try:
+                        paper = self._deserialize_paper(paper_data)
+                        self.candidates.append(paper)
+                    except Exception as e:
+                        logger.warning(f"Error deserializing candidate paper: {e}")
                         continue
                 
                 # Check if we need to reset daily counter
@@ -110,7 +132,7 @@ class ArxivAutoPoster:
                 if state.get('last_posting'):
                     self.last_posting = datetime.fromisoformat(state['last_posting'])
                 
-                logger.info(f"Loaded auto-poster state: {self.posted_total} total posts, {len(self.posted_today)} today, {len(self.posted_papers)} posted papers tracked, {len(self.queue)} papers in queue")
+                logger.info(f"Loaded auto-poster state: {self.posted_total} total posts, {len(self.posted_today)} today, {len(self.posted_papers)} posted papers tracked, {len(self.pool)} papers in pool, {len(self.candidates)} candidates, {len(self.blacklist)} blacklisted")
                 
         except Exception as e:
             logger.warning(f"Error loading auto-poster state: {e}")
@@ -118,20 +140,31 @@ class ArxivAutoPoster:
     def save_state(self):
         """Save persistent state to file."""
         try:
-            # Serialize queue
-            queue_data = []
-            for paper in self.queue:
+            # Serialize pool
+            pool_data = []
+            for paper in self.pool:
                 try:
-                    queue_data.append(self._serialize_paper(paper))
+                    pool_data.append(self._serialize_paper(paper))
                 except Exception as e:
-                    logger.warning(f"Error serializing paper for queue: {e}")
+                    logger.warning(f"Error serializing paper for pool: {e}")
+                    continue
+            
+            # Serialize candidates
+            candidates_data = []
+            for paper in self.candidates:
+                try:
+                    candidates_data.append(self._serialize_paper(paper))
+                except Exception as e:
+                    logger.warning(f"Error serializing candidate paper: {e}")
                     continue
             
             state = {
                 'posted_total': self.posted_total,
                 'posted_today': self.posted_today,
                 'posted_papers': list(self.posted_papers),
-                'queue': queue_data,
+                'blacklist': list(self.blacklist),
+                'pool': pool_data,
+                'candidates': candidates_data,
                 'last_reset': datetime.now(timezone.utc).date().isoformat(),
                 'last_discovery': self.last_discovery.isoformat() if self.last_discovery else None,
                 'last_posting': self.last_posting.isoformat() if self.last_posting else None
@@ -158,7 +191,8 @@ class ArxivAutoPoster:
             'doi': paper.doi,
             'altmetric_score': paper.altmetric_score,
             'altmetric_data': paper.altmetric_data,
-            'priority_score': paper.priority_score
+            'priority_score': paper.priority_score,
+            'accessibility': paper.accessibility
         }
 
     def _deserialize_paper(self, paper_data: Dict[str, Any]):
@@ -181,6 +215,7 @@ class ArxivAutoPoster:
             doi=paper_data.get('doi'),
             altmetric_score=paper_data.get('altmetric_score'),
             altmetric_data=paper_data.get('altmetric_data'),
+            accessibility=paper_data.get('accessibility')
         )
         
         # Set priority score directly to avoid recalculation
@@ -188,21 +223,60 @@ class ArxivAutoPoster:
         
         return paper
 
-    async def refresh_altmetric_for_queue(self):
-        """Refresh Altmetric data for all papers currently in the queue."""
-        if ArxivAltmetricTracker is None or not self.queue:
+    async def refresh_altmetric_for_pool(self):
+        """Refresh Altmetric data for papers in the pool using tiered frequency."""
+        if ArxivAltmetricTracker is None or not self.pool:
             return
             
         try:
-            logger.info(f"Refreshing Altmetric data for {len(self.queue)} papers in queue...")
-            queue_before = [(p.arxiv_id, p.altmetric_score) for p in self.queue]
+            now = datetime.now(timezone.utc)
+            papers_to_refresh = []
+            
+            # Determine which papers need Altmetric refresh based on age and last refresh
+            for paper in self.pool:
+                days_old = (now - paper.published).total_seconds() / (24 * 3600)
+                
+                # Get last refresh time (stored in altmetric_data if available)
+                last_refresh = None
+                if paper.altmetric_data and 'last_refresh' in paper.altmetric_data:
+                    last_refresh = datetime.fromisoformat(paper.altmetric_data['last_refresh'])
+                
+                should_refresh = False
+                
+                if last_refresh is None:
+                    # Never refreshed - always refresh
+                    should_refresh = True
+                elif days_old < 2:
+                    # Papers < 2 days old: refresh every 4 hours
+                    should_refresh = (now - last_refresh).total_seconds() > 4 * 3600
+                elif days_old < 7:
+                    # Papers 2-7 days old: refresh once per day
+                    should_refresh = (now - last_refresh).total_seconds() > 24 * 3600
+                else:
+                    # Papers > 7 days old: refresh every 3 days
+                    should_refresh = (now - last_refresh).total_seconds() > 3 * 24 * 3600
+                
+                if should_refresh:
+                    papers_to_refresh.append(paper)
+            
+            if not papers_to_refresh:
+                logger.info("No papers in pool need Altmetric refresh at this time")
+                return
+            
+            logger.info(f"Refreshing Altmetric data for {len(papers_to_refresh)} papers in pool...")
+            refresh_before = [(p.arxiv_id, p.altmetric_score) for p in papers_to_refresh]
             
             async with ArxivAltmetricTracker() as tracker:
-                await tracker.enrich_with_altmetric(self.queue)
+                await tracker.enrich_with_altmetric(papers_to_refresh)
             
-            # Log changes in Altmetric scores
+            # Update last refresh timestamp and log changes
             updates = []
-            for (paper_id, old_score), paper in zip(queue_before, self.queue):
+            for (paper_id, old_score), paper in zip(refresh_before, papers_to_refresh):
+                # Add refresh timestamp to altmetric_data
+                if paper.altmetric_data is None:
+                    paper.altmetric_data = {}
+                paper.altmetric_data['last_refresh'] = now.isoformat()
+                
                 if old_score != paper.altmetric_score:
                     updates.append(f"{paper_id}: {old_score or 0:.1f} → {paper.altmetric_score or 0:.1f}")
             
@@ -211,11 +285,11 @@ class ArxivAutoPoster:
                 for update in updates:
                     logger.info(f"  • {update}")
                 
-                # Re-sort queue by updated priority scores
-                self.queue.sort(key=lambda p: p.priority_score, reverse=True)
+                # Re-sort pool by updated priority scores
+                self.pool.sort(key=lambda p: p.priority_score, reverse=True)
                 # Save state to persist the updates
                 self.save_state()
-                logger.info("Queue re-ranked and state saved with updated Altmetric data")
+                logger.info("Pool re-ranked and state saved with updated Altmetric data")
             else:
                 logger.info("No changes in Altmetric scores detected")
                 
@@ -224,68 +298,58 @@ class ArxivAutoPoster:
             # Continue execution - don't let Altmetric failures break the bot
 
     async def run_maintenance_cycle(self):
-        """Run a maintenance cycle - discover papers and post if needed."""
+        """Run a maintenance cycle - discover papers, cleanup pool, and post if needed."""
         if not self.enabled:
             return
         try:
             now = datetime.now(timezone.utc)
+            
+            # Always do pool cleanup and candidate updates
+            await self._cleanup_pool()
+            
             # Check if we should discover new papers
             should_discover = (
                 self.last_discovery is None or 
                 (now - self.last_discovery) >= self.discovery_interval
             )
             if should_discover:
-                # Refresh Altmetric data for all papers in the queue
-                await self.refresh_altmetric_for_queue()
+                # Refresh Altmetric data for papers in pool using tiered frequency
+                await self.refresh_altmetric_for_pool()
+                
+                # Discover new papers
                 new_papers = await self.discover_papers()
                 if new_papers:
-                    # Update existing queue papers with latest data from new_papers (in-place)
-                    for new_paper in new_papers:
-                        for queued_paper in self.queue:
-                            if queued_paper.arxiv_id == new_paper.arxiv_id:
-                                queued_paper.altmetric_score = new_paper.altmetric_score
-                                queued_paper.altmetric_data = new_paper.altmetric_data
-                                queued_paper.priority_score = new_paper.priority_score
-                                queued_paper.title = new_paper.title
-                                queued_paper.authors = new_paper.authors
-                                queued_paper.abstract = new_paper.abstract
-                                queued_paper.categories = new_paper.categories
-                                queued_paper.published = new_paper.published
-                                queued_paper.updated = new_paper.updated
-                                queued_paper.pdf_url = new_paper.pdf_url
-                                queued_paper.arxiv_url = new_paper.arxiv_url
-                                queued_paper.doi = new_paper.doi
-                    # Filter out papers we've already posted or queued
-                    existing_ids = {p.arxiv_id for p in self.queue} | set(self.posted_papers)
-                    truly_new = [p for p in new_papers if p.arxiv_id not in existing_ids]
-                    # Add new papers to queue
-                    self.queue.extend(truly_new)
-                    # Sort entire queue by updated priority scores
-                    self.queue.sort(key=lambda p: p.priority_score, reverse=True)
-                    # Keep queue manageable
-                    self.queue = self.queue[:50]
+                    # Add new papers to pool
+                    self.pool.extend(new_papers)
+                    # Sort entire pool by updated priority scores
+                    self.pool.sort(key=lambda p: p.priority_score, reverse=True)
+                    # Keep pool manageable
+                    self.pool = self.pool[:self.max_pool_size]
                     self.last_discovery = now
+                    
+                    # Update candidates from refreshed pool
+                    await self._update_candidates()
                     self.save_state()
-                    logger.info(f"Discovery complete: {len(truly_new)} new papers added, queue re-ranked, now has {len(self.queue)} papers")
+                    logger.info(f"Discovery complete: {len(new_papers)} new papers added to pool, now has {len(self.pool)} papers, {len(self.candidates)} candidates")
                 else:
-                    # Even if no new papers, re-rank existing queue (already done in refresh)
-                    if self.queue:
-                        self.queue.sort(key=lambda p: p.priority_score, reverse=True)
-                        self.save_state()
-                        logger.info(f"No new papers found, but re-ranked existing queue of {len(self.queue)} papers")
+                    # Even if no new papers, update candidates from existing pool
+                    await self._update_candidates()
+                    self.save_state()
+                    logger.info(f"No new papers found, but updated candidates from existing pool of {len(self.pool)} papers")
                     self.last_discovery = now
+            
             # Check if we should post a paper (with lock to coordinate with manual posts)
             async with self._posting_lock:
                 should_post = (
-                    len(self.queue) > 0 and
+                    len(self.candidates) > 0 and
                     len(self.posted_today) < self.max_posts_per_day and
                     (self.last_posting is None or (now - self.last_posting) >= self.posting_interval)
                 )
                 if should_post:
                     # Post directly within the lock (avoid calling post_next_paper to prevent deadlock)
                     try:
-                        # Get the highest priority paper
-                        paper = self.queue.pop(0)
+                        # Get the highest priority candidate
+                        paper = self.candidates.pop(0)
                         # Get the actual room ID for the target channel
                         target_room_id = self._get_target_room_id()
                         if not target_room_id:
@@ -299,8 +363,11 @@ class ArxivAutoPoster:
                         self.posted_papers.add(paper.arxiv_id)
                         self.posted_total += 1
                         self.last_posting = datetime.now(timezone.utc)
+                        
+                        # Backfill candidates
+                        await self._update_candidates()
                         self.save_state()
-                        logger.info(f"Posted paper (auto): {paper.title[:50]}... (Score: {paper.priority_score:.1f})")
+                        logger.info(f"Posted paper (auto): {paper.title[:50]}... (Score: {paper.priority_score:.1f}, Accessibility: {paper.accessibility})")
                     except Exception as e:
                         logger.error(f"Error posting paper (auto): {e}")
         except Exception as e:
@@ -318,7 +385,7 @@ class ArxivAutoPoster:
             async with ArxivAltmetricTracker() as tracker:
                 papers = await tracker.get_trending_papers(
                     days_back=3,
-                    count=20,  # Get more papers to filter from
+                    count=30,  # Get more papers to filter from
                     include_altmetric=True
                 )
             
@@ -326,38 +393,46 @@ class ArxivAutoPoster:
                 logger.warning("No papers found during discovery")
                 return []
             
-            # Re-rank papers with updated priority scores
-            for paper in papers:
-                paper.priority_score = paper._calculate_priority()
-            
-            # Sort by updated priority scores
-            papers.sort(key=lambda p: p.priority_score, reverse=True)
-            
-            # Log Altmetric statistics for monitoring
-            papers_with_altmetric = [p for p in papers if p.altmetric_score and p.altmetric_score > 0]
-            if papers_with_altmetric:
-                avg_score = sum(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score) / len(papers_with_altmetric)
-                max_score = max(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score)
-                logger.info(f"📊 Altmetric coverage: {len(papers_with_altmetric)}/{len(papers)} papers ({len(papers_with_altmetric)/len(papers)*100:.1f}%)")
-                logger.info(f"📊 Altmetric scores - Avg: {avg_score:.1f}, Max: {max_score:.1f}")
-            else:
-                logger.warning("⚠️ No papers found with Altmetric data")
-            
-            # Filter out already posted papers
-            new_papers = [p for p in papers if p.arxiv_id not in self.posted_papers]
+            # Filter out papers we've already processed (posted, blacklisted, or in pool)
+            existing_ids = (
+                {p.arxiv_id for p in self.pool} | 
+                set(self.posted_papers) | 
+                self.blacklist
+            )
+            new_papers = [p for p in papers if p.arxiv_id not in existing_ids]
             
             if len(new_papers) < len(papers):
-                logger.info(f"📝 Filtered out {len(papers) - len(new_papers)} already posted papers")
+                logger.info(f"📝 Filtered out {len(papers) - len(new_papers)} already processed papers")
             
-            # Apply trending criteria - only keep papers that meet trending thresholds
+            if not new_papers:
+                logger.info("No new papers to process after filtering")
+                return []
+            
+            # Apply trending criteria (no accessibility filtering here)
             trending_papers = self._filter_trending_papers(new_papers)
             
             if len(trending_papers) < len(new_papers):
                 logger.info(f"🔥 Filtered to {len(trending_papers)} truly trending papers (from {len(new_papers)} candidates)")
             
-            # Log top papers for monitoring
+            # Re-rank papers with updated priority scores
+            for paper in trending_papers:
+                paper.priority_score = paper._calculate_priority()
+            
+            # Sort by updated priority scores
+            trending_papers.sort(key=lambda p: p.priority_score, reverse=True)
+            
+            # Log statistics
+            papers_with_altmetric = [p for p in trending_papers if p.altmetric_score and p.altmetric_score > 0]
+            if papers_with_altmetric:
+                avg_score = sum(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score) / len(papers_with_altmetric)
+                max_score = max(p.altmetric_score for p in papers_with_altmetric if p.altmetric_score)
+                logger.info(f"📊 Altmetric coverage: {len(papers_with_altmetric)}/{len(trending_papers)} papers ({len(papers_with_altmetric)/len(trending_papers)*100:.1f}%)")
+                logger.info(f"📊 Altmetric scores - Avg: {avg_score:.1f}, Max: {max_score:.1f}")
+            
+            # Log top paper for monitoring
             if trending_papers:
-                logger.info(f"🏆 Top trending paper: '{trending_papers[0].title[:60]}...' (Priority: {trending_papers[0].priority_score:.1f}, Altmetric: {trending_papers[0].altmetric_score or 0:.1f})")
+                top_paper = trending_papers[0]
+                logger.info(f"🏆 Top trending paper: '{top_paper.title[:60]}...' (Priority: {top_paper.priority_score:.1f}, Altmetric: {top_paper.altmetric_score or 0:.1f})")
             
             return trending_papers
             
@@ -449,16 +524,143 @@ class ArxivAutoPoster:
         
         return trending_papers
 
+    async def _cleanup_pool(self):
+        """Remove old papers from pool and update candidates."""
+        if not self.pool:
+            return
+            
+        now = datetime.now(timezone.utc)
+        initial_count = len(self.pool)
+        
+        # Remove papers older than retention period
+        self.pool = [
+            paper for paper in self.pool 
+            if (now - paper.published).total_seconds() < self.pool_retention_days * 24 * 3600
+        ]
+        
+        removed_count = initial_count - len(self.pool)
+        if removed_count > 0:
+            logger.info(f"Removed {removed_count} papers older than {self.pool_retention_days} days from pool")
+        
+        # Update candidates from top papers in pool
+        await self._update_candidates()
+    
+    async def _update_candidates(self):
+        """Update the candidates list from the top papers in the pool, assessing accessibility only for potential candidates."""
+        if not self.pool:
+            self.candidates = []
+            return
+        
+        # Sort pool by priority score
+        self.pool.sort(key=lambda p: p.priority_score, reverse=True)
+        
+        # Get top papers that aren't already posted or blacklisted
+        available_papers = [
+            paper for paper in self.pool 
+            if paper.arxiv_id not in self.posted_papers and paper.arxiv_id not in self.blacklist
+        ]
+        
+        if not available_papers:
+            self.candidates = []
+            return
+        
+        # Assess accessibility for top papers that might become candidates
+        # We'll check more papers than we need in case some are filtered out
+        papers_to_assess = available_papers[:self.max_candidates * 2]  # Check 2x candidates needed
+        
+        logger.info(f"♿ Assessing accessibility for top {len(papers_to_assess)} papers for candidate selection...")
+        
+        accessible_candidates = []
+        for paper in papers_to_assess:
+            # If accessibility is already assessed, use it
+            if paper.accessibility is not None:
+                if paper.accessibility != "low":
+                    accessible_candidates.append(paper)
+                    logger.debug(f"✅ Keeping paper with {paper.accessibility} accessibility: {paper.title[:50]}...")
+                else:
+                    self.blacklist.add(paper.arxiv_id)
+                    logger.debug(f"❌ Blacklisting paper with low accessibility: {paper.title[:50]}...")
+            else:
+                # Assess accessibility for this potential candidate
+                accessibility = await self._assess_paper_accessibility(paper)
+                paper.accessibility = accessibility
+                
+                if accessibility != "low":
+                    # Recalculate priority score with accessibility multiplier
+                    paper.priority_score = paper._calculate_priority()
+                    accessible_candidates.append(paper)
+                    logger.debug(f"✅ Keeping paper with {accessibility} accessibility: {paper.title[:50]}...")
+                else:
+                    self.blacklist.add(paper.arxiv_id)
+                    logger.debug(f"❌ Blacklisting paper with low accessibility: {paper.title[:50]}...")
+            
+            # Stop if we have enough candidates
+            if len(accessible_candidates) >= self.max_candidates:
+                break
+        
+        # Re-sort by priority score (in case accessibility multipliers changed scores)
+        accessible_candidates.sort(key=lambda p: p.priority_score, reverse=True)
+        
+        # Update candidates to top accessible papers
+        old_candidates = {p.arxiv_id for p in self.candidates}
+        self.candidates = accessible_candidates[:self.max_candidates]
+        new_candidates = {p.arxiv_id for p in self.candidates}
+        
+        # Log changes
+        added = new_candidates - old_candidates
+        removed = old_candidates - new_candidates
+        
+        if added or removed:
+            logger.info(f"Updated candidates: +{len(added)} added, -{len(removed)} removed")
+            for paper_id in added:
+                paper = next(p for p in self.candidates if p.arxiv_id == paper_id)
+                logger.info(f"  + Added candidate: {paper.title[:50]}... (Score: {paper.priority_score:.1f}, Accessibility: {paper.accessibility})")
+            for paper_id in removed:
+                logger.info(f"  - Removed candidate: {paper_id}")
+        
+        # Log accessibility filtering stats if any papers were assessed
+        assessed_papers = [p for p in papers_to_assess if p.accessibility is not None]
+        if assessed_papers:
+            accessibility_counts = {}
+            for paper in assessed_papers:
+                acc = paper.accessibility
+                accessibility_counts[acc] = accessibility_counts.get(acc, 0) + 1
+            logger.info(f"📊 Accessibility distribution for assessed papers: {accessibility_counts}")
+    
+    def remove_candidate(self, arxiv_id: str) -> bool:
+        """
+        Manually remove a paper from candidates and add to blacklist.
+        
+        Args:
+            arxiv_id: The arXiv ID of the paper to remove
+            
+        Returns:
+            True if paper was found and removed, False otherwise
+        """
+        # Find and remove from candidates
+        for i, paper in enumerate(self.candidates):
+            if paper.arxiv_id == arxiv_id:
+                removed_paper = self.candidates.pop(i)
+                self.blacklist.add(arxiv_id)
+                logger.info(f"Manually removed candidate: {removed_paper.title[:50]}... (added to blacklist)")
+                
+                # Backfill candidates from pool
+                asyncio.create_task(self._update_candidates())
+                self.save_state()
+                return True
+        
+        return False 
+
     async def post_next_paper(self) -> bool:
         """
-        Post the next paper from the queue (for manual commands).
+        Post the next paper from the candidates (for manual commands).
         
         Returns:
             True if a paper was posted successfully
         """
         # CRITICAL FIX: Use lock to prevent simultaneous posting
         async with self._posting_lock:
-            if not self.enabled or not self.queue:
+            if not self.enabled or not self.candidates:
                 return False
                 
             if len(self.posted_today) >= self.max_posts_per_day:
@@ -466,8 +668,8 @@ class ArxivAutoPoster:
                 return False
                 
             try:
-                # Get the highest priority paper
-                paper = self.queue.pop(0)
+                # Get the highest priority candidate
+                paper = self.candidates.pop(0)
                 
                 # Get the actual room ID for the target channel
                 target_room_id = self._get_target_room_id()
@@ -484,9 +686,12 @@ class ArxivAutoPoster:
                 self.posted_papers.add(paper.arxiv_id)  # Prevent re-posting
                 self.posted_total += 1
                 self.last_posting = datetime.now(timezone.utc)
+                
+                # Backfill candidates
+                await self._update_candidates()
                 self.save_state()
                 
-                logger.info(f"Posted paper (manual): {paper.title[:50]}... (Score: {paper.priority_score:.1f})")
+                logger.info(f"Posted paper (manual): {paper.title[:50]}... (Score: {paper.priority_score:.1f}, Accessibility: {paper.accessibility})")
                 return True
                 
             except Exception as e:
@@ -597,13 +802,29 @@ class ArxivAutoPoster:
         if self.last_posting:
             next_posting = (self.last_posting + self.posting_interval).strftime('%Y-%m-%d %H:%M UTC')
         
+        # Calculate pool age distribution
+        pool_age_stats = {}
+        if self.pool:
+            ages = [(now - paper.published).days for paper in self.pool]
+            pool_age_stats = {
+                'min_age_days': min(ages),
+                'max_age_days': max(ages),
+                'avg_age_days': sum(ages) / len(ages)
+            }
+        
         return {
             'enabled': self.enabled,
-            'queue_size': len(self.queue),
+            'pool_size': len(self.pool),
+            'candidates_count': len(self.candidates),
+            'blacklist_size': len(self.blacklist),
             'posted_total': self.posted_total,
             'posts_today': len(self.posted_today),
             'max_posts_per_day': self.max_posts_per_day,
             'target_channel': self.target_channel,
+            'pool_retention_days': self.pool_retention_days,
+            'max_pool_size': self.max_pool_size,
+            'max_candidates': self.max_candidates,
+            'pool_age_stats': pool_age_stats,
             'last_discovery': self.last_discovery.strftime('%Y-%m-%d %H:%M UTC') if self.last_discovery else None,
             'last_posting': self.last_posting.strftime('%Y-%m-%d %H:%M UTC') if self.last_posting else None,
             'next_discovery': next_discovery,
@@ -643,3 +864,81 @@ class ArxivAutoPoster:
         
         logger.warning(f"Could not find room ID for target channel: {self.target_channel}")
         return None 
+
+    async def _assess_paper_accessibility(self, paper) -> str:
+        """
+        Assess the accessibility of a paper using BAML WritePaperSummary.
+        
+        Args:
+            paper: ArxivPaper object to assess
+            
+        Returns:
+            Accessibility rating: "low", "medium", "high", or "unknown" if assessment fails
+        """
+        try:
+            from baml_client.sync_client import b
+            
+            logger.debug(f"Assessing accessibility for paper: {paper.title[:50]}...")
+            
+            # Try to crawl the full paper content first
+            try:
+                crawler = getattr(self.bot, 'crawler', None)
+                if crawler:
+                    from crawl4ai import CrawlerRunConfig
+                    
+                    # Try the HTML version first (better for parsing)
+                    html_url = paper.arxiv_url.replace('/abs/', '/html/')
+                    
+                    logger.debug(f"Attempting to crawl ArXiv HTML for accessibility assessment: {html_url}")
+                    await crawler.start()
+                    result = await crawler.arun(url=html_url, config=CrawlerRunConfig(
+                        exclude_external_images=False,
+                        wait_for_images=True
+                    ))
+                    
+                    if result and hasattr(result, 'markdown') and result.markdown:
+                        logger.debug(f"Successfully crawled paper content for accessibility assessment ({len(result.markdown)} chars)")
+                        
+                        # Parse the full paper content
+                        parsed_paper = b.ParsePaper(result.markdown)
+                        
+                        # Get paper summary with accessibility assessment
+                        paper_summary = b.WritePaperSummary(parsed_paper)
+                        
+                        accessibility = paper_summary.accessibility
+                        logger.debug(f"Accessibility assessment from full content: {accessibility}")
+                        return accessibility
+                    else:
+                        logger.debug(f"Failed to crawl paper content for accessibility assessment from {html_url}")
+                else:
+                    logger.debug("No crawler available for accessibility assessment")
+                    
+            except Exception as crawl_error:
+                logger.debug(f"Crawling failed for accessibility assessment {paper.arxiv_url}: {crawl_error}")
+            
+            # Fallback: assess accessibility based on abstract only
+            logger.debug("Falling back to accessibility assessment from abstract...")
+            
+            # Create a minimal Paper object from the abstract
+            from baml_client.types import Paper, Paragraph
+            
+            minimal_paper = Paper(
+                title=paper.title,
+                body=[Paragraph(text=paper.abstract)],
+                figures=[],
+                authors=paper.authors,
+                date=paper.published.strftime('%Y-%m-%d'),
+                tags=paper.categories,
+                purpose="Research paper accessibility assessment"
+            )
+            
+            # Get accessibility assessment
+            paper_summary = b.WritePaperSummary(minimal_paper)
+            accessibility = paper_summary.accessibility
+            
+            logger.debug(f"Accessibility assessment from abstract: {accessibility}")
+            return accessibility
+            
+        except Exception as e:
+            logger.warning(f"Failed to assess accessibility for paper '{paper.title[:50]}...': {e}")
+            return "unknown" 

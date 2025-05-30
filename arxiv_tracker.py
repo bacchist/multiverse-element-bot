@@ -37,6 +37,7 @@ class ArxivPaper:
     altmetric_score: Optional[float] = None
     altmetric_data: Optional[Dict[str, Any]] = None
     priority_score: float = field(default=0.0)
+    accessibility: Optional[str] = None  # "low", "medium", "high", or None if not assessed
 
     def __post_init__(self):
         """Calculate priority score based on available metrics."""
@@ -59,14 +60,25 @@ class ArxivPaper:
             elif self.altmetric_score >= 5:
                 score += 50   # Boost for highly trending papers
         
-        # Recency bonus (reduced impact compared to Altmetric)
+        # Extended recency bonus with continuous decay over 2 weeks
         now = datetime.now(timezone.utc)
         hours_old = (now - self.published).total_seconds() / 3600
-        if hours_old < 24:
-            score += 25 * (1 - hours_old / 24)  # Reduced from 50
-        elif hours_old < 48:
-            # Smaller bonus for papers 24-48 hours old
-            score += 12 * (1 - (hours_old - 24) / 24)  # Reduced from 25
+        days_old = hours_old / 24
+        
+        if days_old < 1:
+            # First 24 hours: linear decay from 25 to 12
+            score += 25 * (1 - days_old)
+        elif days_old < 2:
+            # 24-48 hours: linear decay from 12 to 0
+            score += 12 * (1 - (days_old - 1))
+        elif days_old < 14:
+            # 2-14 days: continued negative decay to encourage removal of old papers
+            # This allows high Altmetric scores to still overcome age
+            decay_rate = -2  # Points lost per day after 48 hours
+            score += decay_rate * (days_old - 2)
+        else:
+            # Beyond 2 weeks: heavy penalty to encourage removal
+            score -= 50
         
         # Category bonus for popular AI categories (reduced impact)
         popular_categories = {'cs.AI': 15, 'cs.LG': 12, 'cs.CL': 10, 'cs.CV': 10, 'cs.NE': 8}
@@ -74,6 +86,13 @@ class ArxivPaper:
             if category in popular_categories:
                 score += popular_categories[category]
                 break
+        
+        # Accessibility multiplier
+        if self.accessibility == "high":
+            score *= 1.2  # 20% bonus for high accessibility
+        elif self.accessibility == "medium":
+            score *= 1.0  # No change for medium accessibility
+        # Low accessibility papers should be filtered out before this calculation
         
         # Bonus for papers with social media engagement (from Altmetric data)
         if self.altmetric_data:
