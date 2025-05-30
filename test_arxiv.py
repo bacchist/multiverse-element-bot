@@ -126,13 +126,13 @@ async def test_auto_poster():
         
         # Test discovery
         print("\n🔍 Testing paper discovery...")
-        new_papers = await auto_poster.discover_papers(days_back=1)
-        print(f"   Found {new_papers} new papers")
+        new_papers = await auto_poster.discover_papers()
+        print(f"   Found {len(new_papers)} new papers")
         
         # Show status
         status = auto_poster.get_status()
         print(f"\n📊 Status:")
-        print(f"   Queue size: {status['queue_size']}")
+        print(f"   Pool size: {status['pool_size']}")
         print(f"   Enabled: {status['enabled']}")
         print(f"   Target: {status['target_channel']}")
         

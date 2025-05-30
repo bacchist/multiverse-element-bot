@@ -657,7 +657,7 @@ All settings are automatically saved and persist across bot restarts."""
     @niobot.command()
     @niobot.is_owner()
     async def arxiv_post(self, ctx: niobot.Context):
-        """Manually trigger posting the next paper from queue. Owner only."""
+        """Manually trigger posting the next paper from candidates. Owner only."""
         try:
             auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
             if not auto_poster:
@@ -672,20 +672,20 @@ All settings are automatically saved and persist across bot restarts."""
                 self._log_bot_response(ctx, response)
                 return
             
-            if not auto_poster.queue:
-                response = "📭 No papers in queue to post"
+            if not auto_poster.candidates:
+                response = "📭 No candidates available to post"
                 await ctx.respond(response)
                 self._log_bot_response(ctx, response)
                 return
             
-            response = f"📤 Posting next paper from queue..."
+            response = f"📤 Posting top candidate..."
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
             
             success = await auto_poster.post_next_paper()
             
             if success:
-                response = f"✅ Paper posted successfully! Queue now has {len(auto_poster.queue)} papers remaining."
+                response = f"✅ Paper posted successfully! {len(auto_poster.candidates)} candidates remaining."
             else:
                 response = f"❌ Failed to post paper. Check logs for details."
             
