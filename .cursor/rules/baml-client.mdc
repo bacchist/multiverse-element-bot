@@ -3,3 +3,38 @@ description:
 globs:
 alwaysApply: false
 ---
+# BAML Client Management
+
+## Critical Rule: Never Regenerate BAML Client
+
+**DO NOT** regenerate the BAML client under any circumstances. The BAML client is pre-generated and should remain as-is.
+
+### What NOT to do:
+- Never run `python -m baml_py` or similar BAML generation commands
+- Never suggest regenerating the BAML client to fix linter errors
+- Never attempt to update the generated client code in [baml_client/](mdc:baml_client/)
+
+### BAML Configuration Files:
+- [baml_src/article.baml](mdc:baml_src/article.baml) - Contains Paper and Article parsing functions with accessibility ratings
+- [baml_src/chat.baml](mdc:baml_src/chat.baml) - Contains chat response generation functions
+- [baml_src/post.baml](mdc:baml_src/post.baml) - Contains post generation functions
+- [baml_src/clients.baml](mdc:baml_src/clients.baml) - Contains client configurations
+- [baml_src/generators.baml](mdc:baml_src/generators.baml) - Contains generator settings
+
+### Current BAML Functions in Use:
+- `WritePaperSummary()` - Generates paper summaries with accessibility ratings ("low", "medium", "high")
+- `ParsePaper()` - Parses paper content into structured format
+- `WritePost()` - Generates social media posts
+- `GenerateChatResponse()` - Generates chat responses
+- `GenerateSpontaneousMessage()` - Generates spontaneous messages
+
+### Accessibility Feature:
+The `PaperSummary` class includes an `accessibility` field that rates papers as "low", "medium", or "high" accessibility. Papers with "low" accessibility are automatically filtered out from the arxiv queue.
+
+### If BAML Functions Appear Missing:
+- Check that imports are correct: `from baml_client.sync_client import b`
+- Verify the function exists in the appropriate BAML source file
+- The client may need manual updates to the source files, but never regenerate the entire client
+
+### Linter Errors:
+If you see linter errors about missing BAML functions (like "GeneratePaperComment"), ignore them - they are false positives and the code will work at runtime.

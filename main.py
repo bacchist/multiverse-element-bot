@@ -94,7 +94,7 @@ try:
         bot=bot,
         target_channel="#ai-papers:themultiverse.school",  # Change this to your desired channel
         max_posts_per_day=999,  # Effectively no limit
-        posting_interval=timedelta(hours=4),
+        posting_interval=timedelta(hours=12),
         discovery_interval=timedelta(hours=1)
     )
     
