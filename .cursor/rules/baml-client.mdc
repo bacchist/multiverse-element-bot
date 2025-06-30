@@ -5,14 +5,50 @@ alwaysApply: false
 ---
 # BAML Client Management
 
-## Critical Rule: Never Regenerate BAML Client
+## ⚠️ CRITICAL: Never Regenerate BAML Client
 
-**DO NOT** regenerate the BAML client under any circumstances. The BAML client is pre-generated and should remain as-is.
+**DO NOT** run `baml-cli generate` or attempt to regenerate the BAML client files.
 
-### What NOT to do:
-- Never run `python -m baml_py` or similar BAML generation commands
-- Never suggest regenerating the BAML client to fix linter errors
-- Never attempt to update the generated client code in [baml_client/](mdc:baml_client/)
+### Why This Rule Exists
+
+The project has version conflicts between:
+- BAML CLI version (0.80.2) 
+- Generator version specified in [generators.baml](mdc:baml_src/generators.baml) (0.86.1)
+- Python package version requirements
+
+### What This Means
+
+- The existing BAML client in [baml_client/](mdc:baml_client/) works correctly
+- Regenerating will break the bot due to version mismatches
+- Changes to [chat.baml](mdc:baml_src/chat.baml) and other BAML files are fine to make
+- The bot will use the existing generated client code
+
+### Safe Operations
+
+✅ **SAFE**: Edit BAML files like [chat.baml](mdc:baml_src/chat.baml)
+✅ **SAFE**: Modify prompts and function definitions
+✅ **SAFE**: Add new BAML functions (they just won't be available until client is regenerated)
+✅ **SAFE**: Run the bot with existing client
+
+❌ **DANGEROUS**: Running `baml-cli generate`
+❌ **DANGEROUS**: Updating BAML versions without careful coordination
+❌ **DANGEROUS**: Deleting [baml_client/](mdc:baml_client/) directory
+
+### If BAML Changes Are Needed
+
+1. Make changes to BAML files
+2. Test that existing functionality still works
+3. Document what new functions were added
+4. Leave regeneration for when version conflicts are resolved
+
+### Current Working State
+
+The bot's autonomous chat system works with:
+- [autonomous_chat.py](mdc:autonomous_chat.py) - Main chat logic
+- [baml_client/sync_client.py](mdc:baml_client/sync_client.py) - Generated client (DO NOT TOUCH)
+- [chat.baml](mdc:baml_src/chat.baml) - Prompt definitions
+
+Keep this working state intact!
 
 ### BAML Configuration Files:
 - [baml_src/article.baml](mdc:baml_src/article.baml) - Contains Paper and Article parsing functions with accessibility ratings

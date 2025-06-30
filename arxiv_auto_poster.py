@@ -598,10 +598,6 @@ class ArxivAutoPoster:
                 else:
                     self.blacklist.add(paper.arxiv_id)
                     logger.debug(f"❌ Blacklisting paper with low accessibility: {paper.title[:50]}...")
-            
-            # Stop if we have enough candidates
-            if len(accessible_candidates) >= self.max_candidates:
-                break
         
         # Re-sort by priority score (in case accessibility multipliers changed scores)
         accessible_candidates.sort(key=lambda p: p.priority_score, reverse=True)
