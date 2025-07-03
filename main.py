@@ -87,34 +87,28 @@ bot.crawler = crawler  # Attach crawler to bot for module access  # type: ignore
 # Mount the bot commands module
 bot.mount_module("bot_commands")
 
-# Optional ArXiv auto-poster integration
-# TEMPORARILY DISABLED - Uncomment to re-enable
-# try:
-#     # Initialize auto-poster with default settings
-#     arxiv_auto_poster = ArxivAutoPoster(
-#         bot=bot,
-#         target_channel="#ai-papers:themultiverse.school",  # Change this to your desired channel
-#         max_posts_per_day=999,  # Effectively no limit
-#         posting_interval=timedelta(hours=12),
-#         discovery_interval=timedelta(hours=1)
-#     )
-#     
-#     # Attach auto-poster to bot for command access
-#     setattr(bot, 'arxiv_auto_poster', arxiv_auto_poster)
-#     
-#     if arxiv_auto_poster.enabled:
-#         logging.info("✅ ArXiv auto-poster initialized and enabled")
-#     else:
-#         logging.info("⚠️ ArXiv auto-poster initialized but disabled (missing dependencies)")
-#         
-# except ImportError as e:
-#     logging.info(f"ℹ️ ArXiv auto-poster not available: {e}")
-#     # Set a disabled placeholder so commands can detect it's not available
-#     setattr(bot, 'arxiv_auto_poster', None)
-
-# Explicitly disable arXiv functionality
-setattr(bot, 'arxiv_auto_poster', None)
-logging.info("ℹ️ ArXiv auto-poster temporarily disabled")
+try:
+    # Initialize auto-poster with default settings
+    arxiv_auto_poster = ArxivAutoPoster(
+        bot=bot,
+        target_channel="#ai-papers:themultiverse.school",  # Change this to your desired channel
+        max_posts_per_day=999,  # Effectively no limit
+        posting_interval=timedelta(hours=12),
+        discovery_interval=timedelta(hours=1)
+    )
+    
+    # Attach auto-poster to bot for command access
+    setattr(bot, 'arxiv_auto_poster', arxiv_auto_poster)
+    
+    if arxiv_auto_poster.enabled:
+        logging.info("✅ ArXiv auto-poster initialized and enabled")
+    else:
+        logging.info("⚠️ ArXiv auto-poster initialized but disabled (missing dependencies)")
+        
+except ImportError as e:
+    logging.info(f"ℹ️ ArXiv auto-poster not available: {e}")
+    # Set a disabled placeholder so commands can detect it's not available
+    setattr(bot, 'arxiv_auto_poster', None)
 
 @bot.on_event("ready")
 async def on_ready(_):
