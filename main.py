@@ -87,13 +87,14 @@ bot.crawler = crawler  # Attach crawler to bot for module access  # type: ignore
 # Mount the bot commands module
 bot.mount_module("bot_commands")
 
+# Optional ArXiv auto-poster integration
 try:
     # Initialize auto-poster with default settings
     arxiv_auto_poster = ArxivAutoPoster(
         bot=bot,
         target_channel="#ai-papers:themultiverse.school",  # Change this to your desired channel
         max_posts_per_day=999,  # Effectively no limit
-        posting_interval=timedelta(hours=12),
+        posting_interval=timedelta(hours=4),
         discovery_interval=timedelta(hours=1)
     )
     

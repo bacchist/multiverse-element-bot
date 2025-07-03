@@ -586,18 +586,17 @@ class ArxivAutoPoster:
                 paper.accessibility = accessibility
                 
                 if accessibility != "low":
-                    # Apply accessibility multiplier to existing priority score (don't recalculate)
-                    original_score = paper.priority_score
-                    if accessibility == "high":
-                        paper.priority_score = original_score * 1.2  # 20% bonus for high accessibility
-                    elif accessibility == "medium":
-                        paper.priority_score = original_score * 1.0  # No change for medium accessibility
-                    
+                    # Recalculate priority score with accessibility multiplier
+                    paper.priority_score = paper._calculate_priority()
                     accessible_candidates.append(paper)
-                    logger.debug(f"✅ Keeping paper with {accessibility} accessibility: {paper.title[:50]}... (Score: {original_score:.1f} → {paper.priority_score:.1f})")
+                    logger.debug(f"✅ Keeping paper with {accessibility} accessibility: {paper.title[:50]}...")
                 else:
                     self.blacklist.add(paper.arxiv_id)
                     logger.debug(f"❌ Blacklisting paper with low accessibility: {paper.title[:50]}...")
+            
+            # Stop if we have enough candidates
+            if len(accessible_candidates) >= self.max_candidates:
+                break
         
         # Re-sort by priority score (in case accessibility multipliers changed scores)
         accessible_candidates.sort(key=lambda p: p.priority_score, reverse=True)

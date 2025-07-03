@@ -24,7 +24,7 @@ class AutonomousChat:
         self.conversation_history: Dict[str, List[Dict[str, Any]]] = {}  # Recent messages per room
         self.max_history_length = 15  # Keep last 15 messages for better context
         self.min_response_interval = timedelta(minutes=1)  # Don't respond too frequently (reduced to 1 minute)
-        self.spontaneous_check_interval = timedelta(minutes=30)  # Check for spontaneous messages (increased from 20 minutes)
+        self.spontaneous_check_interval = timedelta(minutes=20)  # Check for spontaneous messages (increased from 12 minutes)
         self.last_spontaneous_check: Dict[str, datetime] = {}
         self.enabled_rooms: Dict[str, bool] = {}  # Track which rooms have autonomous chat enabled
         
@@ -331,8 +331,8 @@ class AutonomousChat:
                 is_bot_message=False
             )
             
-            # Decide if we should use high temperature (50% chance for spicy responses)
-            use_high_temp = random.random() < 0.5
+            # Decide if we should use high temperature (20% chance for spicy responses)
+            use_high_temp = random.random() < 0.2
             client_options = self._get_client_registry(use_high_temp)
             
             # Generate response with or without client registry
@@ -383,8 +383,8 @@ class AutonomousChat:
             # Get conversation context
             context = self._get_conversation_context(room_id, room_name)
             
-            # Decide if we should use high temperature (50% chance for spicy responses)
-            use_high_temp = random.random() < 0.5
+            # Decide if we should use high temperature (20% chance for spicy responses)
+            use_high_temp = random.random() < 0.2
             client_options = self._get_client_registry(use_high_temp)
             
             # Generate spontaneous message with or without client registry
@@ -483,7 +483,7 @@ class AutonomousChat:
                     room_name = getattr(room, 'display_name', None) or getattr(room, 'name', None)
                     
                     # Random chance to check (don't check every room every time)
-                    if random.random() < 0.2:  # 20% chance per room per check
+                    if random.random() < 0.3:  # 30% chance per room per check
                         message = await self.check_spontaneous_message(room_id, room_name)
                         
                         if message:
