@@ -577,6 +577,7 @@ All settings are automatically saved and persist across bot restarts."""
 **Blacklist**: {status['blacklist_size']} papers filtered out
 **Posted**: {status['posted_total']} total papers
 **Today**: {status['posts_today']}/{status['max_posts_per_day']} posts
+**Min Score Threshold**: {status['minimum_score_threshold']:.1f}
 **Target**: {status['target_channel']}
 
 **Last Discovery**: {status['last_discovery'] or 'Never'}
@@ -761,6 +762,7 @@ All settings are automatically saved and persist across bot restarts."""
         !arxiv_config channel #new-channel:server.com - Change target channel
         !arxiv_config max_posts 3 - Set max posts per day
         !arxiv_config interval 4 - Set posting interval in hours
+        !arxiv_config min_score 100 - Set minimum score threshold for posting
         """
         try:
             auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
@@ -774,13 +776,19 @@ All settings are automatically saved and persist across bot restarts."""
                 # Show current settings
                 response = f"""⚙️ **ArXiv Auto-Poster Configuration**
 
-**Enabled**: {auto_poster.enabled}
 **Target Channel**: {auto_poster.target_channel}
-**Max Posts/Day**: {auto_poster.max_posts_per_day}
+**Max Posts Per Day**: {auto_poster.max_posts_per_day}
 **Posting Interval**: {auto_poster.posting_interval.total_seconds() / 3600:.1f} hours
 **Discovery Interval**: {auto_poster.discovery_interval.total_seconds() / 3600:.1f} hours
+**Pool Retention**: {auto_poster.pool_retention_days} days
+**Max Pool Size**: {auto_poster.max_pool_size} papers
+**Max Candidates**: {auto_poster.max_candidates} papers
 
-Use `!arxiv_config <setting> <value>` to change settings."""
+**Current State**:
+- Posted today: {len(auto_poster.posted_today)}/{auto_poster.max_posts_per_day}
+- Pool size: {len(auto_poster.pool)}
+- Candidates: {len(auto_poster.candidates)}
+- Last posting: {auto_poster.last_posting.strftime('%Y-%m-%d %H:%M UTC') if auto_poster.last_posting else 'Never'}"""
                 
                 await ctx.respond(response)
                 self._log_bot_response(ctx, response)
@@ -814,11 +822,23 @@ Use `!arxiv_config <setting> <value>` to change settings."""
                 except ValueError:
                     response = "❌ Invalid number for interval"
                     
+            elif setting == "min_score" and value:
+                try:
+                    min_score = float(value)
+                    if 0 <= min_score <= 1000:
+                        auto_poster.minimum_score_threshold = min_score
+                        response = f"✅ Minimum score threshold set to: {min_score:.1f}"
+                    else:
+                        response = "❌ Minimum score must be between 0 and 1000"
+                except ValueError:
+                    response = "❌ Invalid number for minimum score"
+                    
             else:
                 response = """❌ Invalid setting. Available settings:
 - channel <#channel:server.com>
 - max_posts <1-20>
-- interval <0.5-24 hours>"""
+- interval <0.5-24 hours>
+- min_score <0-1000>"""
             
             await ctx.respond(response)
             self._log_bot_response(ctx, response)
@@ -1088,5 +1108,66 @@ Papers must meet **at least one** of these criteria:
             
         except Exception as e:
             response = f"❌ Error showing candidates: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_reset_daily(self, ctx: niobot.Context):
+        """Reset the daily posting counter. Owner only."""
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            old_count = len(auto_poster.posted_today)
+            auto_poster.posted_today = []
+            auto_poster.save_state()
+            
+            response = f"✅ Reset daily posting counter (was {old_count}, now 0)"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error resetting daily counter: {str(e)}"
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+
+    @niobot.command()
+    @niobot.is_owner()
+    async def arxiv_config_show(self, ctx: niobot.Context):
+        """Show current ArXiv auto-poster configuration. Owner only."""
+        try:
+            auto_poster = getattr(self.bot, 'arxiv_auto_poster', None)
+            if not auto_poster:
+                response = "❌ ArXiv auto-poster not initialized"
+                await ctx.respond(response)
+                self._log_bot_response(ctx, response)
+                return
+            
+            response = f"""⚙️ **ArXiv Auto-Poster Configuration**
+
+**Target Channel**: {auto_poster.target_channel}
+**Max Posts Per Day**: {auto_poster.max_posts_per_day}
+**Posting Interval**: {auto_poster.posting_interval.total_seconds() / 3600:.1f} hours
+**Discovery Interval**: {auto_poster.discovery_interval.total_seconds() / 3600:.1f} hours
+**Pool Retention**: {auto_poster.pool_retention_days} days
+**Max Pool Size**: {auto_poster.max_pool_size} papers
+**Max Candidates**: {auto_poster.max_candidates} papers
+
+**Current State**:
+- Posted today: {len(auto_poster.posted_today)}/{auto_poster.max_posts_per_day}
+- Pool size: {len(auto_poster.pool)}
+- Candidates: {len(auto_poster.candidates)}
+- Last posting: {auto_poster.last_posting.strftime('%Y-%m-%d %H:%M UTC') if auto_poster.last_posting else 'Never'}"""
+
+            await ctx.respond(response)
+            self._log_bot_response(ctx, response)
+            
+        except Exception as e:
+            response = f"❌ Error showing configuration: {str(e)}"
             await ctx.respond(response)
             self._log_bot_response(ctx, response) 

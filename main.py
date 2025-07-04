@@ -95,7 +95,8 @@ try:
         target_channel="#ai-papers:themultiverse.school",  # Change this to your desired channel
         max_posts_per_day=999,  # Effectively no limit
         posting_interval=timedelta(hours=4),
-        discovery_interval=timedelta(hours=1)
+        discovery_interval=timedelta(hours=1),
+        minimum_score_threshold=100.0  # Only post papers with priority score >= 100
     )
     
     # Attach auto-poster to bot for command access
@@ -376,7 +377,7 @@ async def arxiv_maintenance_task():
         except Exception as e:
             logger.error(f"Error in arXiv maintenance cycle: {e}")
         
-        # Wait 30 minutes before next check
-        await asyncio.sleep(30 * 60)
+        # Wait 1 hour before next check (reduced frequency to respect intervals)
+        await asyncio.sleep(60 * 60)
 
 bot.run(access_token=bot_config.ACCESS_TOKEN)

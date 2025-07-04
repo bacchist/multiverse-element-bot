@@ -33,7 +33,8 @@ class ArxivAutoPoster:
         target_channel: str = "#ai-papers:themultiverse.school",
         max_posts_per_day: int = 999,  # Effectively no limit
         posting_interval: timedelta = timedelta(hours=4),
-        discovery_interval: timedelta = timedelta(hours=4)
+        discovery_interval: timedelta = timedelta(hours=4),
+        minimum_score_threshold: float = 0.0  # Minimum priority score required to post
     ):
         """
         Initialize the auto-poster.
@@ -44,12 +45,14 @@ class ArxivAutoPoster:
             max_posts_per_day: Maximum papers to post per day
             posting_interval: Minimum time between posts
             discovery_interval: How often to discover new papers
+            minimum_score_threshold: Minimum priority score required to post
         """
         self.bot = bot
         self.target_channel = target_channel
         self.max_posts_per_day = max_posts_per_day
         self.posting_interval = posting_interval
         self.discovery_interval = discovery_interval
+        self.minimum_score_threshold = minimum_score_threshold
         
         # State tracking
         self.pool: List = []  # Renamed from queue - papers stored for up to 2 weeks
@@ -120,11 +123,18 @@ class ArxivAutoPoster:
                 
                 # Check if we need to reset daily counter
                 last_reset = state.get('last_reset')
+                today = datetime.now(timezone.utc).date()
+                
                 if last_reset:
                     last_reset_date = datetime.fromisoformat(last_reset).date()
-                    today = datetime.now(timezone.utc).date()
                     if last_reset_date < today:
                         self.posted_today = []
+                        logger.info(f"Reset daily counter: new day detected (last reset: {last_reset_date}, today: {today})")
+                else:
+                    # No last_reset found - this could be first run or old state file
+                    # Reset daily counter to be safe
+                    self.posted_today = []
+                    logger.info("Reset daily counter: no last_reset found in state file")
                 
                 # Load timestamps
                 if state.get('last_discovery'):
@@ -340,11 +350,24 @@ class ArxivAutoPoster:
             
             # Check if we should post a paper (with lock to coordinate with manual posts)
             async with self._posting_lock:
-                should_post = (
-                    len(self.candidates) > 0 and
-                    len(self.posted_today) < self.max_posts_per_day and
-                    (self.last_posting is None or (now - self.last_posting) >= self.posting_interval)
-                )
+                has_candidates = len(self.candidates) > 0
+                under_daily_limit = len(self.posted_today) < self.max_posts_per_day
+                interval_elapsed = (self.last_posting is None or (now - self.last_posting) >= self.posting_interval)
+                
+                # Check if top candidate meets minimum score threshold
+                meets_score_threshold = False
+                top_candidate_score = 0.0
+                if has_candidates:
+                    top_candidate_score = self.candidates[0].priority_score
+                    meets_score_threshold = top_candidate_score >= self.minimum_score_threshold
+                
+                should_post = has_candidates and under_daily_limit and interval_elapsed and meets_score_threshold
+                
+                logger.debug(f"Posting check: candidates={len(self.candidates)}, posted_today={len(self.posted_today)}/{self.max_posts_per_day}, "
+                           f"last_posting={self.last_posting}, interval_elapsed={interval_elapsed}, "
+                           f"top_score={top_candidate_score:.1f}, min_threshold={self.minimum_score_threshold:.1f}, "
+                           f"meets_threshold={meets_score_threshold}, should_post={should_post}")
+                
                 if should_post:
                     # Post directly within the lock (avoid calling post_next_paper to prevent deadlock)
                     try:
@@ -666,6 +689,12 @@ class ArxivAutoPoster:
             if len(self.posted_today) >= self.max_posts_per_day:
                 logger.info("Daily posting limit reached")
                 return False
+            
+            # Check if top candidate meets minimum score threshold
+            top_candidate = self.candidates[0]
+            if top_candidate.priority_score < self.minimum_score_threshold:
+                logger.info(f"Top candidate score ({top_candidate.priority_score:.1f}) below minimum threshold ({self.minimum_score_threshold:.1f})")
+                return False
                 
             try:
                 # Get the highest priority candidate
@@ -821,6 +850,7 @@ class ArxivAutoPoster:
             'posted_total': self.posted_total,
             'posts_today': len(self.posted_today),
             'max_posts_per_day': self.max_posts_per_day,
+            'minimum_score_threshold': self.minimum_score_threshold,
             'target_channel': self.target_channel,
             'pool_retention_days': self.pool_retention_days,
             'max_pool_size': self.max_pool_size,

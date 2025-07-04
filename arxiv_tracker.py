@@ -165,7 +165,7 @@ class ArxivAltmetricTracker:
             List of ArxivPaper objects
         """
         if not self.session:
-            self.session = aiohttp.ClientSession()
+            raise RuntimeError("Session not initialized. Use async context manager (async with ArxivAltmetricTracker())")
             
         categories = categories or self.default_categories
         
@@ -324,7 +324,7 @@ class ArxivAltmetricTracker:
             List of papers with Altmetric data added
         """
         if not self.session:
-            self.session = aiohttp.ClientSession()
+            raise RuntimeError("Session not initialized. Use async context manager (async with ArxivAltmetricTracker())")
             
         logger.info(f"Enriching {len(papers)} papers with Altmetric data...")
         
