@@ -1,10 +1,11 @@
 // Learn more about clients at https://docs.boundaryml.com/docs/snippets/clients/overview
 
-client<llm> CustomGPT41Nano {
+client<llm> CustomGPT41Mini {
   provider openai
   options {
-    model "gpt-4.1-nano"
+    model "gpt-4.1-mini"
     api_key env.OPENAI_API_KEY
+    temperature 0.8
   }
 }
 

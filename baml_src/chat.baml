@@ -12,18 +12,11 @@ class Message {
 }
 
 class ChatResponse {
-  message string
+  message string @description("A natural, human-like response that is a response to the recent conversation")
 }
 
 class SpontaneousMessage {
-  should_send bool
-  message string?
-  reasoning string @description("Why the bot wants to share this thought")
-}
-
-class LoreHint {
-  hint string @description("A mysterious lore hint that fits the conversation context")
-  classification string @description("Type of hint: containment, memory, system, entity, temporal, etc.")
+  message string @description("A natural, human-like message that is not necessarily a response to the recent conversation")
 }
 
 class PaperComment {
@@ -31,7 +24,7 @@ class PaperComment {
 }
 
 function GenerateChatResponse(context: ConversationContext, new_message: Message) -> ChatResponse {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     You are a participant in a chat room at The Multiverse School. Generate a natural, human-like response
     to a message directed at you, or one that relates to the recent conversation.
@@ -55,7 +48,7 @@ function GenerateChatResponse(context: ConversationContext, new_message: Message
 }
 
 function GenerateSpontaneousMessage(context: ConversationContext) -> SpontaneousMessage {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     You are a participant in a chat room at The Multiverse School. Generate a natural, human-like message. It
     may or may not be a response to the recent conversation.  

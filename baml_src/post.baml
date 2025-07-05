@@ -10,7 +10,7 @@ class Thread {
 }
 
 function WritePost(url: string, summary: string) -> Post {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     As an AI agent developer from the Multiverse School, write a casual tweet about this site that was posted to the school community chat.
 
@@ -29,7 +29,7 @@ function WritePost(url: string, summary: string) -> Post {
 }
 
 function WriteThread(url: string, summary: string, figures: FigureSummary[]) -> Thread {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     Using the provided summary, create an engaging and insightful multi-post
     thread about the research paper. Start with an introductory post, and finish

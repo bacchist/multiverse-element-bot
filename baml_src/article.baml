@@ -45,7 +45,7 @@ class PaperSummary {
 }
 
 function ParseArticle(article: string) -> Article {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     Parse the article into the following format:
 
@@ -58,7 +58,7 @@ function ParseArticle(article: string) -> Article {
 }
 
 function ParsePaper(paper: string) -> Paper {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     Parse the paper into the following format:
 
@@ -70,7 +70,7 @@ function ParsePaper(paper: string) -> Paper {
 }
 
 function WriteArticleSummary(article: Article) -> ArticleSummary {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     Write a summary of the article:
 
@@ -82,7 +82,7 @@ function WriteArticleSummary(article: Article) -> ArticleSummary {
 }
 
 function WritePaperSummary(paper: Paper) -> PaperSummary {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     Write a multi-paragraph summary of the paper and assess its accessibility:
 
@@ -94,7 +94,7 @@ function WritePaperSummary(paper: Paper) -> PaperSummary {
 }
 
 function WriteFigureSummary(figure: image) -> FigureSummary {
-  client CustomGPT41Nano
+  client CustomGPT41Mini
   prompt #"
     Write a summary of the figure:
 
